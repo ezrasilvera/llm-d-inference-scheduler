@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package runner contains the standalone (non-K8s) EPP runner.
+// Package runner contains the nokube (non-K8s) EPP runner.
 // It starts the EPP without any Kubernetes API server dependency.
 package runner
 
@@ -58,10 +58,10 @@ import (
 
 var setupLog = ctrl.Log.WithName("setup")
 
-// Run is the entrypoint for the standalone EPP.
+// Run is the entrypoint for the nokube EPP.
 func Run(ctx context.Context) error {
 	logutil.InitSetupLogging()
-	setupLog.Info("standalone EPP build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
+	setupLog.Info("nokube EPP build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
 
 	opts := runserver.NewOptions()
 	opts.AddFlags(pflag.CommandLine)
@@ -98,10 +98,10 @@ func Run(ctx context.Context) error {
 	}
 
 	if rawConfig.BackendDiscovery == nil {
-		return fmt.Errorf("standalone mode requires backendDiscovery to be configured in the config file")
+		return fmt.Errorf("nokube mode requires backendDiscovery to be configured in the config file")
 	}
 
-	// Build the endpoint pool. In standalone mode the selector is not used for pod
+	// Build the endpoint pool. In nokube mode the selector is not used for pod
 	// filtering — BackendDiscovery provides backends directly. The pool object is still
 	// needed for pool identity (name, namespace).
 	namespace := resolveNamespace(opts.PoolNamespace)
@@ -144,7 +144,7 @@ func Run(ctx context.Context) error {
 	// Guard: fail fast if any K8s notification sources are configured.
 	for _, p := range handle.GetAllPlugins() {
 		if _, ok := p.(fwkdl.NotificationSource); ok {
-			return fmt.Errorf("plugin %q uses k8s-notification-source which is not supported in standalone mode", p.TypedName())
+			return fmt.Errorf("plugin %q uses k8s-notification-source which is not supported in nokube mode", p.TypedName())
 		}
 	}
 
@@ -198,7 +198,7 @@ func Run(ctx context.Context) error {
 	svcName := extProcPb.ExternalProcessor_ServiceDesc.ServiceName
 	healthcheck.SetServingStatus(svcName, healthgrpc.HealthCheckResponse_SERVING)
 
-	setupLog.Info("standalone EPP starting",
+	setupLog.Info("nokube EPP starting",
 		"grpcPort", opts.GRPCPort,
 		"healthPort", opts.GRPCHealthPort,
 		"metricsPort", opts.MetricsPort)
@@ -306,5 +306,5 @@ func resolvePoolName(opts *runserver.Options) string {
 	if env := os.Getenv("POD_NAME"); env != "" {
 		return env
 	}
-	return "standalone-epp"
+	return "nokube-epp"
 }

@@ -71,13 +71,13 @@ type EndpointPickerConfig struct {
 
 	// +optional
 	// BackendDiscovery specifies which BackendDiscovery plugin to use for discovering
-	// inference backends in standalone (non-K8s) mode. Ignored by the K8s binary.
+	// inference backends in nokube (non-K8s) mode. Ignored by the K8s binary.
 	// Exactly one BackendDiscovery plugin may be configured.
 	BackendDiscovery *BackendDiscoveryConfig `json:"backendDiscovery,omitempty"`
 
 	// +optional
 	// StaticConfig seeds the datastore with InferenceObjectives and InferenceModelRewrites
-	// at startup. Used in standalone (non-K8s) mode in place of CRD reconcilers.
+	// at startup. Used in nokube (non-K8s) mode in place of CRD reconcilers.
 	// The K8s binary ignores this field.
 	StaticConfig *StaticConfig `json:"staticConfig,omitempty"`
 }
@@ -131,7 +131,7 @@ func (bdc *BackendDiscoveryConfig) String() string {
 }
 
 // StaticConfig seeds the datastore with InferenceObjectives and InferenceModelRewrites
-// at startup, for use in standalone (non-K8s) mode. PoolRef fields within the embedded
+// at startup, for use in nokube (non-K8s) mode. PoolRef fields within the embedded
 // specs are ignored.
 type StaticConfig struct {
 	// +optional

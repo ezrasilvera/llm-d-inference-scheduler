@@ -87,7 +87,7 @@ type Datastore interface {
 	// BackendDelete removes the backend with the given namespaced name.
 	BackendDelete(id types.NamespacedName)
 	// MarkDiscoverySynced marks the datastore as having received its initial sync from a
-	// non-K8s BackendDiscovery source. Sets PoolHasSynced() = true in standalone mode.
+	// non-K8s BackendDiscovery source. Sets PoolHasSynced() = true in nokube mode.
 	MarkDiscoverySynced()
 
 	// Clears the store state, happens when the pool gets deleted.
@@ -119,7 +119,7 @@ type datastore struct {
 	// mu is used to synchronize access to pool, objectives, and rewrites.
 	mu   sync.RWMutex
 	pool *datalayer.EndpointPool
-	// discoverySynced is set to true by MarkDiscoverySynced, used in standalone mode.
+	// discoverySynced is set to true by MarkDiscoverySynced, used in nokube mode.
 	discoverySynced bool
 	// key: InferenceObjective name, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
@@ -139,7 +139,7 @@ func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) *datastore {
 }
 
 // NewDatastoreWithPool creates a new Datastore pre-seeded with the given pool.
-// Intended for standalone (non-K8s) mode where the pool is provided upfront rather
+// Intended for nokube (non-K8s) mode where the pool is provided upfront rather
 // than reconciled from a Kubernetes InferencePool resource.
 func NewDatastoreWithPool(ctx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32, pool *datalayer.EndpointPool) Datastore {
 	return NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(pool)

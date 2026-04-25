@@ -150,7 +150,7 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 }
 
 // StartPollers starts only the polling and endpoint data sources without requiring a
-// ctrl.Manager. Use this in standalone (non-K8s) mode where no K8s NotificationSources
+// ctrl.Manager. Use this in nokube (non-K8s) mode where no K8s NotificationSources
 // are configured. The existing Start method remains unchanged for the K8s path.
 func (r *Runtime) StartPollers(ctx context.Context) error {
 	return nil

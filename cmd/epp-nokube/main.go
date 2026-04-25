@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package main contains the standalone (non-Kubernetes) Endpoint Picker (EPP).
+// Package main contains the nokube (non-Kubernetes) Endpoint Picker (EPP).
 // It discovers backends via a configured BackendDiscovery plugin instead of
 // watching Kubernetes pods.
 package main
@@ -24,7 +24,7 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/llm-d/llm-d-inference-scheduler/cmd/epp-standalone/runner"
+	"github.com/llm-d/llm-d-inference-scheduler/cmd/epp-nokube/runner"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 func run() int {
 	ctx := ctrl.SetupSignalHandler()
 	if err := runner.Run(ctx); err != nil {
-		ctrl.Log.Error(err, "standalone EPP exited with error")
+		ctrl.Log.Error(err, "nokube EPP exited with error")
 		return 1
 	}
 	return 0
