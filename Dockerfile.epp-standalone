@@ -1,0 +1,40 @@
+ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
+
+FROM --platform=${BUILDPLATFORM} quay.io/projectquay/golang:1.25 AS go-builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG COMMIT_SHA=unknown
+ARG BUILD_REF
+ARG LDFLAGS="-s -w"
+
+WORKDIR /workspace
+
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+RUN go mod download
+
+COPY apix/     apix/
+COPY cmd/      cmd/
+COPY internal/ internal/
+COPY pkg/      pkg/
+COPY version/  version/
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -ldflags="${LDFLAGS} -X github.com/llm-d/llm-d-inference-scheduler/version.CommitSHA=${COMMIT_SHA} -X github.com/llm-d/llm-d-inference-scheduler/version.BuildRef=${BUILD_REF}" \
+    -o bin/epp-standalone cmd/epp-standalone/main.go
+
+FROM ${BASE_IMAGE}
+
+WORKDIR /
+
+COPY --from=go-builder /workspace/bin/epp-standalone /app/epp-standalone
+
+USER 65532:65532
+
+EXPOSE 9002
+EXPOSE 9003
+EXPOSE 9090
+
+ENTRYPOINT ["/app/epp-standalone"]

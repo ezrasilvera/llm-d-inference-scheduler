@@ -22,6 +22,9 @@ IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 
+EPP_STANDALONE_TAG ?= dev
+export EPP_STANDALONE_IMAGE ?= $(IMAGE_TAG_BASE)-standalone:$(EPP_STANDALONE_TAG)
+
 SIDECAR_TAG ?= dev
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
 export SIDECAR_IMAGE ?= $(SIDECAR_IMAGE_TAG_BASE):$(SIDECAR_TAG)
@@ -148,8 +151,10 @@ sidecar_TEST_PACKAGES = ./pkg/sidecar/...
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
+epp-standalone_IMAGE = $(EPP_STANDALONE_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
+epp-standalone_NAME = epp-standalone
 sidecar_NAME = $(SIDECAR_NAME)
 
 
@@ -321,7 +326,10 @@ coverage-compare: image-build-builder ## Compare coverage vs baseline (BASELINE_
 ##@ Build
 
 .PHONY: build
-build: build-epp build-sidecar ## Build the project for both epp and sidecar
+build: build-epp build-epp-standalone build-sidecar ## Build the project for epp, epp-standalone and sidecar
+
+.PHONY: build-standalone
+build-standalone: build-epp-standalone ## Build the standalone (non-K8s) EPP binary
 
 .PHONY: build-%
 build-%: image-build-builder ## Build the project
@@ -330,8 +338,11 @@ build-%: image-build-builder ## Build the project
 
 ##@ Container image Build/Push/Pull
 
+.PHONY: docker-build-standalone
+docker-build-standalone: image-build-epp-standalone ## Build the standalone (non-K8s) EPP container image
+
 .PHONY:	image-build
-image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
+image-build: image-build-epp image-build-epp-standalone image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)

@@ -81,6 +81,15 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
+	// BackendUpsert adds or updates a backend from a non-K8s discovery source.
+	// Unlike PodUpdateOrAddIfNotExist, this takes EndpointMetadata directly, bypassing corev1.Pod.
+	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) bool
+	// BackendDelete removes the backend with the given namespaced name.
+	BackendDelete(id types.NamespacedName)
+	// MarkDiscoverySynced marks the datastore as having received its initial sync from a
+	// non-K8s BackendDiscovery source. Sets PoolHasSynced() = true in standalone mode.
+	MarkDiscoverySynced()
+
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
 }
@@ -110,6 +119,8 @@ type datastore struct {
 	// mu is used to synchronize access to pool, objectives, and rewrites.
 	mu   sync.RWMutex
 	pool *datalayer.EndpointPool
+	// discoverySynced is set to true by MarkDiscoverySynced, used in standalone mode.
+	discoverySynced bool
 	// key: InferenceObjective name, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
 	// modelRewrites store for InferenceModelRewrite objects.
@@ -125,6 +136,13 @@ type datastore struct {
 func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) *datastore {
 	ds.pool = pool
 	return ds
+}
+
+// NewDatastoreWithPool creates a new Datastore pre-seeded with the given pool.
+// Intended for standalone (non-K8s) mode where the pool is provided upfront rather
+// than reconciled from a Kubernetes InferencePool resource.
+func NewDatastoreWithPool(ctx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32, pool *datalayer.EndpointPool) Datastore {
+	return NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(pool)
 }
 
 func (ds *datastore) Clear() {
@@ -187,7 +205,7 @@ func (ds *datastore) PoolGet() (*datalayer.EndpointPool, error) {
 func (ds *datastore) PoolHasSynced() bool {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.pool != nil
+	return ds.pool != nil || ds.discoverySynced
 }
 
 func (ds *datastore) PoolLabelsMatch(podLabels map[string]string) bool {
@@ -372,6 +390,37 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
+}
+
+// BackendUpsert adds or updates a backend from a non-K8s discovery source using EndpointMetadata directly.
+func (ds *datastore) BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) bool {
+	var ep fwkdl.Endpoint
+	existing, ok := ds.pods.Load(meta.NamespacedName)
+	if !ok {
+		ep = ds.epf.NewEndpoint(ds.parentCtx, meta, ds)
+		if ep == nil {
+			return true
+		}
+		ds.pods.Store(meta.NamespacedName, ep)
+		return false
+	}
+	ep = existing.(fwkdl.Endpoint)
+	ep.UpdateMetadata(meta)
+	return true
+}
+
+// BackendDelete removes the backend with the given namespaced name.
+func (ds *datastore) BackendDelete(id types.NamespacedName) {
+	if v, ok := ds.pods.LoadAndDelete(id); ok {
+		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
+	}
+}
+
+// MarkDiscoverySynced marks the datastore as having received its initial non-K8s discovery sync.
+func (ds *datastore) MarkDiscoverySynced() {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.discoverySynced = true
 }
 
 func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) error {

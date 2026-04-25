@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/gateway-api-inference-extension/apix/v1alpha2"
 )
 
 const nilString = "<nil>"
@@ -67,6 +68,18 @@ type EndpointPickerConfig struct {
 	// Parser specifies the parsing logic used by the EPP to process protocol messages.
 	// If unspecified, default parsing behavior will be applied.
 	Parser *ParserConfig `json:"parser,omitempty"`
+
+	// +optional
+	// BackendDiscovery specifies which BackendDiscovery plugin to use for discovering
+	// inference backends in standalone (non-K8s) mode. Ignored by the K8s binary.
+	// Exactly one BackendDiscovery plugin may be configured.
+	BackendDiscovery *BackendDiscoveryConfig `json:"backendDiscovery,omitempty"`
+
+	// +optional
+	// StaticConfig seeds the datastore with InferenceObjectives and InferenceModelRewrites
+	// at startup. Used in standalone (non-K8s) mode in place of CRD reconcilers.
+	// The K8s binary ignores this field.
+	StaticConfig *StaticConfig `json:"staticConfig,omitempty"`
 }
 
 func (cfg EndpointPickerConfig) String() string {
@@ -92,7 +105,49 @@ func (cfg EndpointPickerConfig) String() string {
 	if cfg.Parser != nil {
 		parts = append(parts, fmt.Sprintf("Parser: %v", cfg.Parser))
 	}
+	if cfg.BackendDiscovery != nil {
+		parts = append(parts, fmt.Sprintf("BackendDiscovery: %v", cfg.BackendDiscovery))
+	}
+	if cfg.StaticConfig != nil {
+		parts = append(parts, fmt.Sprintf("StaticConfig: %v", cfg.StaticConfig))
+	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// BackendDiscoveryConfig specifies which BackendDiscovery plugin to use.
+// Mirrors the shape of ParserConfig and SaturationDetectorConfig.
+type BackendDiscoveryConfig struct {
+	// +required
+	// PluginRef specifies the name of the BackendDiscovery plugin instance defined in the
+	// top-level Plugins section.
+	PluginRef string `json:"pluginRef"`
+}
+
+func (bdc *BackendDiscoveryConfig) String() string {
+	if bdc == nil {
+		return nilString
+	}
+	return fmt.Sprintf("{PluginRef: %s}", bdc.PluginRef)
+}
+
+// StaticConfig seeds the datastore with InferenceObjectives and InferenceModelRewrites
+// at startup, for use in standalone (non-K8s) mode. PoolRef fields within the embedded
+// specs are ignored.
+type StaticConfig struct {
+	// +optional
+	// Objectives is a list of InferenceObjective objects to load into the datastore at startup.
+	Objectives []v1alpha2.InferenceObjective `json:"objectives,omitempty"`
+
+	// +optional
+	// ModelRewrites is a list of InferenceModelRewrite objects to load into the datastore at startup.
+	ModelRewrites []v1alpha2.InferenceModelRewrite `json:"modelRewrites,omitempty"`
+}
+
+func (sc *StaticConfig) String() string {
+	if sc == nil {
+		return nilString
+	}
+	return fmt.Sprintf("{Objectives: %d, ModelRewrites: %d}", len(sc.Objectives), len(sc.ModelRewrites))
 }
 
 // PluginSpec contains the information that describes a plugin that
