@@ -61,6 +61,7 @@ type FileDiscovery struct {
 	typedName fwkplugin.TypedName
 	path      string
 	watchFile bool
+	current   map[types.NamespacedName]struct{} // tracks the last known set for deletion diffing
 }
 
 var _ discovery.BackendDiscovery = (*FileDiscovery)(nil)
@@ -154,7 +155,7 @@ func (f *FileDiscovery) load(ctx context.Context, notifier discovery.Notifier) e
 		return fmt.Errorf("unmarshalling %s: %w", f.path, err)
 	}
 
-	seen := make(map[types.NamespacedName]struct{}, len(bf.Backends))
+	incoming := make(map[types.NamespacedName]struct{}, len(bf.Backends))
 	for _, b := range bf.Backends {
 		ns := b.Namespace
 		if ns == "" {
@@ -171,11 +172,18 @@ func (f *FileDiscovery) load(ctx context.Context, notifier discovery.Notifier) e
 		if meta.MetricsHost == "" {
 			meta.MetricsHost = fmt.Sprintf("%s:%s", b.Address, b.Port)
 		}
-		seen[meta.NamespacedName] = struct{}{}
+		incoming[meta.NamespacedName] = struct{}{}
 		notifier.Upsert(meta)
 	}
 
+	// Delete backends that were present in the previous load but are absent now.
+	for id := range f.current {
+		if _, ok := incoming[id]; !ok {
+			notifier.Delete(id)
+		}
+	}
+	f.current = incoming
 	_ = ctx
-	_ = seen
+
 	return nil
 }

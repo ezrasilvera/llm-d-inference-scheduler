@@ -133,6 +133,72 @@ func TestFactory(t *testing.T) {
 	}
 }
 
+// TestLoad_AddAndDelete verifies that successive load() calls correctly upsert new
+// backends and delete backends that are no longer in the file.
+func TestLoad_AddAndDelete(t *testing.T) {
+	first := `
+backends:
+  - name: keep
+    namespace: ns
+    address: "10.0.0.1"
+    port: "8000"
+  - name: remove
+    namespace: ns
+    address: "10.0.0.2"
+    port: "8000"
+`
+	second := `
+backends:
+  - name: keep
+    namespace: ns
+    address: "10.0.0.1"
+    port: "8000"
+  - name: added
+    namespace: ns
+    address: "10.0.0.3"
+    port: "8000"
+`
+	path := writeTempFile(t, first)
+	fd := &FileDiscovery{
+		typedName: fwkplugin.TypedName{Type: PluginType, Name: "test"},
+		path:      path,
+	}
+	notifier := &fakeNotifier{}
+
+	// First load: both backends upserted, nothing deleted.
+	require.NoError(t, fd.load(context.Background(), notifier))
+	assert.Len(t, notifier.upserts, 2)
+	assert.Empty(t, notifier.deletes)
+
+	// Second load: "added" upserted, "remove" deleted, "keep" re-upserted.
+	require.NoError(t, os.WriteFile(path, []byte(second), 0o644))
+	require.NoError(t, fd.load(context.Background(), notifier))
+
+	assert.Len(t, notifier.upserts, 4) // 2 from first load + 2 from second
+	require.Len(t, notifier.deletes, 1)
+	assert.Equal(t, "remove", notifier.deletes[0].Name)
+	assert.Equal(t, "ns", notifier.deletes[0].Namespace)
+}
+
+// TestLoad_DeleteAll verifies that when the file becomes empty all previous backends are deleted.
+func TestLoad_DeleteAll(t *testing.T) {
+	path := writeTempFile(t, sampleYAML)
+	fd := &FileDiscovery{
+		typedName: fwkplugin.TypedName{Type: PluginType, Name: "test"},
+		path:      path,
+	}
+	notifier := &fakeNotifier{}
+
+	require.NoError(t, fd.load(context.Background(), notifier))
+	assert.Len(t, notifier.upserts, 2)
+
+	require.NoError(t, os.WriteFile(path, []byte("backends: []\n"), 0o644))
+	require.NoError(t, fd.load(context.Background(), notifier))
+
+	assert.Len(t, notifier.deletes, 2)
+	assert.Len(t, notifier.upserts, 2) // no new upserts on second load
+}
+
 // TestLoad_ValidYAML verifies that a valid backends YAML file is loaded correctly.
 func TestLoad_ValidYAML(t *testing.T) {
 	path := writeTempFile(t, sampleYAML)
@@ -236,7 +302,7 @@ func TestStart_NoWatch(t *testing.T) {
 	}
 }
 
-// TestStart_WatchFile verifies that a file change triggers a reload.
+// TestStart_WatchFile verifies that a file change triggers a reload with correct upserts and deletes.
 func TestStart_WatchFile(t *testing.T) {
 	path := writeTempFile(t, sampleYAML)
 	fd := &FileDiscovery{
@@ -252,29 +318,39 @@ func TestStart_WatchFile(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- fd.Start(ctx, notifier) }()
 
-	// Wait for initial sync.
+	// Wait for initial sync (2 backends).
 	require.Eventually(t, func() bool {
 		notifier.mu.Lock()
 		defer notifier.mu.Unlock()
 		return notifier.synced
 	}, 2*time.Second, 10*time.Millisecond, "initial MarkSynced not called")
 
-	initialCount := notifier.upsertCount()
-	assert.Equal(t, 2, initialCount)
+	assert.Equal(t, 2, notifier.upsertCount())
 
-	// Write a new file with one backend.
+	// Replace file with one new backend — vllm-0 and vllm-1 should be deleted, vllm-new upserted.
 	newContent := `
 backends:
   - name: vllm-new
+    namespace: ns1
     address: "10.0.0.99"
     port: "8000"
 `
 	require.NoError(t, os.WriteFile(path, []byte(newContent), 0o644))
 
-	// Wait for the reload to produce an additional upsert.
+	// Wait for the deletion of the two original backends.
 	require.Eventually(t, func() bool {
-		return notifier.upsertCount() > initialCount
-	}, 3*time.Second, 50*time.Millisecond, "file reload did not trigger additional upsert")
+		notifier.mu.Lock()
+		defer notifier.mu.Unlock()
+		return len(notifier.deletes) == 2
+	}, 3*time.Second, 50*time.Millisecond, "expected 2 deletions after file reload")
+
+	notifier.mu.Lock()
+	deletedNames := make([]string, len(notifier.deletes))
+	for i, d := range notifier.deletes {
+		deletedNames[i] = d.Name
+	}
+	notifier.mu.Unlock()
+	assert.ElementsMatch(t, []string{"vllm-0", "vllm-1"}, deletedNames)
 
 	cancel()
 	select {
