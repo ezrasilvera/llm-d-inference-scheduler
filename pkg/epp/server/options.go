@@ -247,6 +247,23 @@ func (opts *Options) Validate() error {
 	return nil
 }
 
+// ValidateNokube validates flags for nokube mode. It applies the same checks as
+// Validate() except the pool-name/endpoint-selector requirement, which is not
+// needed in nokube mode (pool identity defaults from --pool-name or POD_NAME env).
+func (opts *Options) ValidateNokube() error {
+	if opts.ConfigText != "" && opts.ConfigFile != "" {
+		return fmt.Errorf("both the %q and %q flags can not be set at the same time", "configText", "configFile")
+	}
+	if opts.ModelServerMetricsScheme != "http" && opts.ModelServerMetricsScheme != "https" {
+		return fmt.Errorf("unexpected %q value for %q flag, it can only be set to 'http' or 'https'",
+			opts.ModelServerMetricsScheme, "model-server-metrics-scheme")
+	}
+	if err := opts.LoggingOptions.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func removeDuplicatePorts(ports []int) []int {
 	seen := sets.NewInt()
 	unique := make([]int, 0, len(ports))

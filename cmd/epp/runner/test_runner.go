@@ -54,5 +54,11 @@ func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.O
 		},
 	}
 
-	return runner.setup(ctx, cfg, opts, pmc, managerOverrides)
+	// Parse config early (same as Run() does) so setup() receives rawConfig.
+	rawConfig, err := runner.parseConfigurationPhaseOne(ctx, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return runner.setup(ctx, cfg, opts, pmc, managerOverrides, rawConfig)
 }

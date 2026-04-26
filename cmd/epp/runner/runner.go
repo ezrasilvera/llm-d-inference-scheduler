@@ -20,16 +20,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
 	"sync/atomic"
 	"time"
 
+	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,6 +49,12 @@ import (
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery"
+	discoverydns "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/dns"
+	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/file"
+	discoverygrpc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/grpc"
+	discoveryhttp "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/http"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/profiling"
@@ -134,6 +146,11 @@ type Runner struct {
 	customCollectors     []prometheus.Collector
 	parser               fwkrh.Parser
 	dlRuntime            *datalayer.Runtime
+	// nokubeMode enables the nokube execution path (no K8s API server required).
+	// Set via WithNokubeMode() or auto-detected from backendDiscovery in config.
+	nokubeMode bool
+	// handle is the plugin handle populated by parseConfigurationPhaseTwo; used by runNokube.
+	handle fwkplugin.Handle
 }
 
 // WithExecutableName sets the name of the executable containing the runner.
@@ -158,6 +175,13 @@ func (r *Runner) WithCustomCollectors(collectors ...prometheus.Collector) *Runne
 	return r
 }
 
+// WithNokubeMode configures the runner to use the nokube execution path,
+// which runs without a Kubernetes API server using BackendDiscovery for endpoint management.
+func (r *Runner) WithNokubeMode() *Runner {
+	r.nokubeMode = true
+	return r
+}
+
 func (r *Runner) Run(ctx context.Context) error {
 	// Setup a very basic logger in case command line argument parsing fails
 	logutil.InitSetupLogging()
@@ -171,9 +195,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := opts.Complete(); err != nil {
 		return err
 	}
-	if err := opts.Validate(); err != nil {
-		setupLog.Error(err, "Failed to validate flags")
-		return err
+
+	// nokube mode has different validation requirements (no pool-name/endpoint-selector needed).
+	if r.nokubeMode {
+		if err := opts.ValidateNokube(); err != nil {
+			setupLog.Error(err, "Failed to validate flags")
+			return err
+		}
+	} else {
+		if err := opts.Validate(); err != nil {
+			setupLog.Error(err, "Failed to validate flags")
+			return err
+		}
 	}
 
 	// Print all flag values
@@ -192,7 +225,23 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
-	// --- Get Kubernetes Config ---
+	// Parse config early so we can detect nokube mode from backendDiscovery presence.
+	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse configuration")
+		return err
+	}
+
+	// Auto-detect nokube mode from config if not already explicitly set.
+	if rawConfig.BackendDiscovery != nil {
+		r.nokubeMode = true
+	}
+
+	if r.nokubeMode {
+		return r.runNokube(ctx, opts, rawConfig)
+	}
+
+	// --- K8s path ---
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		setupLog.Error(err, "Failed to get Kubernetes rest config")
@@ -214,7 +263,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil)
+	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
 	if err != nil {
 		return err
 	}
@@ -236,12 +285,7 @@ func (r *Runner) Run(ctx context.Context) error {
 //
 // The returned Datastore is **only** meant to be used in the integration test.
 // Optional managerOverrides are applied to the controller manager options before creation.
-func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options)) (ctrl.Manager, datastore.Datastore, error) {
-	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
-	if err != nil {
-		setupLog.Error(err, "Failed to parse configuration")
-		return nil, nil, err
-	}
+func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options), rawConfig *configapi.EndpointPickerConfig) (ctrl.Manager, datastore.Datastore, error) {
 	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
 	epf := r.setupMetricsCollection(useNewMetrics, opts, pmc)
 	gknn, err := extractGKNN(opts.PoolName, opts.PoolGroup, opts.PoolNamespace, opts.EndpointSelector)
@@ -506,6 +550,11 @@ func (r *Runner) registerInTreePlugins() {
 	// register saturation detector plugins
 	fwkplugin.Register(concurrency.ConcurrencyDetectorType, concurrency.ConcurrencyDetectorFactory)
 	fwkplugin.Register(utilization.UtilizationDetectorType, utilization.UtilizationDetectorFactory)
+	// register nokube backend discovery plugins
+	fwkplugin.Register(discoveryfile.PluginType, discoveryfile.Factory)
+	fwkplugin.Register(discoveryhttp.PluginType, discoveryhttp.Factory)
+	fwkplugin.Register(discoverygrpc.PluginType, discoverygrpc.Factory)
+	fwkplugin.Register(discoverydns.PluginType, discoverydns.Factory)
 }
 
 func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver.Options) (*configapi.EndpointPickerConfig, error) {
@@ -569,6 +618,7 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	applyDeprecatedEnvFeatureGate(enableExperimentalFlowControlLayer, "Flow Control layer", flowcontrol.FeatureGate, rawConfig)
 
 	handle := fwkplugin.NewEppHandle(ctx, makePodListFunc(ds))
+	r.handle = handle
 	cfg, err := loader.InstantiateAndConfigure(rawConfig, handle, logger)
 
 	if err != nil {
@@ -728,4 +778,185 @@ func resolvePoolNamespace(poolNamespace string) string {
 		return nsEnv
 	}
 	return runserver.DefaultPoolNamespace
+}
+
+// resolveNokubePoolName returns the pool name for nokube mode.
+// Falls back to the POD_NAME env var or a stable default when --pool-name is not set.
+func resolveNokubePoolName(opts *runserver.Options) string {
+	if opts.PoolName != "" {
+		return opts.PoolName
+	}
+	if env := os.Getenv("POD_NAME"); env != "" {
+		return env
+	}
+	return "nokube-epp"
+}
+
+// runNokube is the nokube execution path: no ctrl.GetConfig(), no ctrl.Manager.
+// Backend lifecycle is driven by a BackendDiscovery plugin; goroutines are managed
+// by errgroup.
+func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
+	logger := log.FromContext(ctx)
+
+	// Pool identity from CLI flags — selector/ports not used; BackendDiscovery manages endpoints.
+	namespace := resolvePoolNamespace(opts.PoolNamespace)
+	poolName := resolveNokubePoolName(opts)
+	pool := datalayer.NewEndpointPool(namespace, poolName)
+
+	// Always use new metrics (HTTP polling) in nokube mode.
+	epf := r.setupMetricsCollection(true, opts, nil)
+	ds := datastore.NewDatastoreWithPool(ctx, epf, int32(opts.ModelServerMetricsPort), pool)
+
+	// Seed static objectives and model rewrites at startup.
+	if rawConfig.StaticConfig != nil {
+		for i := range rawConfig.StaticConfig.Objectives {
+			ds.ObjectiveSet(&rawConfig.StaticConfig.Objectives[i])
+		}
+		for i := range rawConfig.StaticConfig.ModelRewrites {
+			ds.ModelRewriteSet(&rawConfig.StaticConfig.ModelRewrites[i])
+		}
+		logger.Info("loaded static config",
+			"objectives", len(rawConfig.StaticConfig.Objectives),
+			"modelRewrites", len(rawConfig.StaticConfig.ModelRewrites))
+	}
+
+	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse configuration")
+		return err
+	}
+
+	// Guard: k8s-notification-source is not usable without a cluster.
+	for _, p := range r.handle.GetAllPlugins() {
+		if _, ok := p.(fwkdl.NotificationSource); ok {
+			return fmt.Errorf("plugin %q uses k8s-notification-source which is not supported in nokube mode", p.TypedName())
+		}
+	}
+
+	// Enforce exactly one BackendDiscovery plugin.
+	if rawConfig.BackendDiscovery == nil {
+		return errors.New("nokube mode requires backendDiscovery to be configured in the config file")
+	}
+	var discoveryCount int
+	for _, p := range r.handle.GetAllPlugins() {
+		if _, ok := p.(discovery.BackendDiscovery); ok {
+			discoveryCount++
+		}
+	}
+	if discoveryCount > 1 {
+		return fmt.Errorf("exactly one BackendDiscovery plugin is allowed, found %d", discoveryCount)
+	}
+	rawDisc := r.handle.Plugin(rawConfig.BackendDiscovery.PluginRef)
+	if rawDisc == nil {
+		return fmt.Errorf("backendDiscovery pluginRef %q not found", rawConfig.BackendDiscovery.PluginRef)
+	}
+	disc, ok := rawDisc.(discovery.BackendDiscovery)
+	if !ok {
+		return fmt.Errorf("plugin %q does not implement BackendDiscovery", rawConfig.BackendDiscovery.PluginRef)
+	}
+
+	// Configure datalayer for HTTP metrics polling (no K8s notification binding).
+	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
+	disallowedExtractorType := ""
+	if !useNewMetrics {
+		disallowedExtractorType = extractormetrics.MetricsExtractorType
+	}
+	if err := r.dlRuntime.Configure(eppConfig.DataConfig, useNewMetrics, disallowedExtractorType, setupLog); err != nil {
+		setupLog.Error(err, "failed to configure datalayer")
+		return err
+	}
+
+	if r.schedulerConfig == nil {
+		return errors.New("scheduler config must be set either by config api or through code")
+	}
+
+	scheduler := scheduling.NewSchedulerWithConfig(r.schedulerConfig)
+	endpointCandidates := requestcontrol.NewDatastoreEndpointCandidates(ds, requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter))
+	admissionController := requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
+	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
+
+	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
+	metrics.Register(r.customCollectors...)
+	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
+
+	// Build gRPC servers.
+	extProcSrv := grpc.NewServer()
+	extProcPb.RegisterExternalProcessorServer(extProcSrv, handlers.NewStreamingServer(ds, director, r.parser))
+
+	healthSrv := grpc.NewServer()
+	healthcheck := health.NewServer()
+	healthgrpc.RegisterHealthServer(healthSrv, healthcheck)
+	svcName := extProcPb.ExternalProcessor_ServiceDesc.ServiceName
+	healthcheck.SetServingStatus(svcName, healthgrpc.HealthCheckResponse_SERVING)
+
+	setupLog.Info("nokube EPP starting",
+		"grpcPort", opts.GRPCPort,
+		"healthPort", opts.GRPCHealthPort,
+		"metricsPort", opts.MetricsPort,
+		"pool", poolName,
+		"namespace", namespace)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return disc.Start(gctx, &nokubeDatastoreNotifier{ds: ds}) })
+	g.Go(func() error { return r.dlRuntime.StartPollers(gctx) })
+	g.Go(func() error { return nokubeServeGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
+	g.Go(func() error { return nokubeServeGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
+	g.Go(func() error { return nokubeServeMetrics(gctx, opts.MetricsPort) })
+	return g.Wait()
+}
+
+// nokubeDatastoreNotifier adapts datastore.Datastore to discovery.Notifier.
+type nokubeDatastoreNotifier struct {
+	ds datastore.Datastore
+}
+
+func (n *nokubeDatastoreNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
+	n.ds.BackendUpsert(context.Background(), meta)
+}
+
+func (n *nokubeDatastoreNotifier) Delete(id types.NamespacedName) {
+	n.ds.BackendDelete(id)
+}
+
+func (n *nokubeDatastoreNotifier) MarkSynced() {
+	n.ds.MarkDiscoverySynced()
+}
+
+// nokubeServeGRPC starts a gRPC server and blocks until ctx is cancelled.
+func nokubeServeGRPC(ctx context.Context, srv *grpc.Server, port int, name string) error {
+	logger := ctrl.Log.WithValues("name", name, "port", port)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return fmt.Errorf("%s gRPC server failed to listen: %w", name, err)
+	}
+	logger.Info("gRPC server listening")
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			logger.Info("gRPC server shutting down")
+			srv.GracefulStop()
+		case <-done:
+		}
+	}()
+	if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+		return fmt.Errorf("%s gRPC server error: %w", name, err)
+	}
+	return nil
+}
+
+// nokubeServeMetrics starts a plain HTTP Prometheus metrics server.
+func nokubeServeMetrics(ctx context.Context, port int) error {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
+	go func() {
+		<-ctx.Done()
+		srv.Shutdown(context.Background()) //nolint:errcheck
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("metrics server error: %w", err)
+	}
+	return nil
 }
