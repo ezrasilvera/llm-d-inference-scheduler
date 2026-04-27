@@ -49,11 +49,10 @@ import (
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery"
-	discoverydns "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/dns"
-	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/file"
-	discoverygrpc "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/grpc"
-	discoveryhttp "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery/http"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
+	discoverydns "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/dns"
+	discoveryk8s "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/k8s"
+	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/file"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -146,10 +145,7 @@ type Runner struct {
 	customCollectors     []prometheus.Collector
 	parser               fwkrh.Parser
 	dlRuntime            *datalayer.Runtime
-	// nokubeMode enables the nokube execution path (no K8s API server required).
-	// Set via WithNokubeMode() or auto-detected from backendDiscovery in config.
-	nokubeMode bool
-	// handle is the plugin handle populated by parseConfigurationPhaseTwo; used by runNokube.
+	// handle is the plugin handle populated by parseConfigurationPhaseTwo.
 	handle fwkplugin.Handle
 }
 
@@ -175,12 +171,6 @@ func (r *Runner) WithCustomCollectors(collectors ...prometheus.Collector) *Runne
 	return r
 }
 
-// WithNokubeMode configures the runner to use the nokube execution path,
-// which runs without a Kubernetes API server using BackendDiscovery for endpoint management.
-func (r *Runner) WithNokubeMode() *Runner {
-	r.nokubeMode = true
-	return r
-}
 
 func (r *Runner) Run(ctx context.Context) error {
 	// Setup a very basic logger in case command line argument parsing fails
@@ -194,19 +184,6 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	if err := opts.Complete(); err != nil {
 		return err
-	}
-
-	// nokube mode has different validation requirements (no pool-name/endpoint-selector needed).
-	if r.nokubeMode {
-		if err := opts.ValidateNokube(); err != nil {
-			setupLog.Error(err, "Failed to validate flags")
-			return err
-		}
-	} else {
-		if err := opts.Validate(); err != nil {
-			setupLog.Error(err, "Failed to validate flags")
-			return err
-		}
 	}
 
 	// Print all flag values
@@ -225,58 +202,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
-	// Parse config early so we can detect nokube mode from backendDiscovery presence.
+	// Parse config early — plugin types determine which infrastructure is needed.
 	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
 		return err
 	}
 
-	// Auto-detect nokube mode from config if not already explicitly set.
-	if rawConfig.BackendDiscovery != nil {
-		r.nokubeMode = true
-	}
-
-	if r.nokubeMode {
-		return r.runNokube(ctx, opts, rawConfig)
-	}
-
-	// --- K8s path ---
-	cfg, err := ctrl.GetConfig()
-	if err != nil {
-		setupLog.Error(err, "Failed to get Kubernetes rest config")
+	if err := opts.Validate(); err != nil {
+		setupLog.Error(err, "Failed to validate flags")
 		return err
 	}
 
-	pmc, err := backendmetrics.NewPodMetricsClientImpl(setupLog, backendmetrics.Config{
-		ModelServerMetricsScheme:        opts.ModelServerMetricsScheme,
-		ModelServerMetricsHTTPSInsecure: opts.ModelServerMetricsHTTPSInsecure,
-		ModelServerMetricsPath:          opts.ModelServerMetricsPath,
-
-		TotalQueuedRequestsMetric:    opts.TotalQueuedRequestsMetric,
-		TotalRunningRequestsMetric:   opts.TotalRunningRequestsMetric,
-		KVCacheUsagePercentageMetric: opts.KVCacheUsagePercentageMetric,
-		LoRAInfoMetric:               opts.LoRAInfoMetric,
-		CacheInfoMetric:              opts.CacheInfoMetric,
-	})
-	if err != nil {
-		return err
-	}
-
-	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
-	if err != nil {
-		return err
-	}
-
-	// --- Start Manager ---
-	// This blocks until a signal is received.
-	setupLog.Info("Controller manager starting")
-	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "Error starting controller manager")
-		return err
-	}
-	setupLog.Info("Controller manager terminated")
-	return nil
+	return r.runErrgroup(ctx, opts, rawConfig)
 }
 
 // setup configures the internal state of the Runner, including the manager,
@@ -294,7 +232,12 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		return nil, nil, err
 	}
 
-	startCrdReconcilers := opts.EndpointSelector == "" // If endpointSelector is empty, it means it's not in the standalone mode. Then we should start the inferencePool and other CRD Reconciler.
+	// startCrdReconcilers is true when:
+	//   - inference-pool plugin is explicitly configured, OR
+	//   - no backendDiscovery is set at all (backward compat: existing configs that
+	//     don't specify backendDiscovery default to full K8s CRD mode).
+	startCrdReconcilers := hasPluginType(rawConfig, discoveryk8s.InferencePoolPluginType) ||
+		rawConfig.BackendDiscovery == nil
 	controllerCfg := runserver.NewControllerConfig(startCrdReconcilers)
 	if err := controllerCfg.PopulateControllerConfig(cfg); err != nil {
 		setupLog.Error(err, "Failed to populate controller config")
@@ -550,11 +493,11 @@ func (r *Runner) registerInTreePlugins() {
 	// register saturation detector plugins
 	fwkplugin.Register(concurrency.ConcurrencyDetectorType, concurrency.ConcurrencyDetectorFactory)
 	fwkplugin.Register(utilization.UtilizationDetectorType, utilization.UtilizationDetectorFactory)
-	// register nokube backend discovery plugins
+	// register backend discovery plugins
 	fwkplugin.Register(discoveryfile.PluginType, discoveryfile.Factory)
-	fwkplugin.Register(discoveryhttp.PluginType, discoveryhttp.Factory)
-	fwkplugin.Register(discoverygrpc.PluginType, discoverygrpc.Factory)
 	fwkplugin.Register(discoverydns.PluginType, discoverydns.Factory)
+	fwkplugin.Register(discoveryk8s.InferencePoolPluginType, discoveryk8s.InferencePoolFactory)
+	fwkplugin.Register(discoveryk8s.StaticSelectorPluginType, discoveryk8s.StaticSelectorFactory)
 }
 
 func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver.Options) (*configapi.EndpointPickerConfig, error) {
@@ -780,27 +723,50 @@ func resolvePoolNamespace(poolNamespace string) string {
 	return runserver.DefaultPoolNamespace
 }
 
-// resolveNokubePoolName returns the pool name for nokube mode.
+// resolveNonK8sPoolName returns the pool name for non-K8s mode.
 // Falls back to the POD_NAME env var or a stable default when --pool-name is not set.
-func resolveNokubePoolName(opts *runserver.Options) string {
+func resolveNonK8sPoolName(opts *runserver.Options) string {
 	if opts.PoolName != "" {
 		return opts.PoolName
 	}
 	if env := os.Getenv("POD_NAME"); env != "" {
 		return env
 	}
-	return "nokube-epp"
+	return "epp"
 }
 
-// runNokube is the nokube execution path: no ctrl.GetConfig(), no ctrl.Manager.
-// Backend lifecycle is driven by a BackendDiscovery plugin; goroutines are managed
-// by errgroup.
-func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
+// needsK8sManager returns true if the config contains a K8s-based discovery plugin
+// (inference-pool or static-selector). When false, no K8s API server is required.
+func needsK8sManager(rawConfig *configapi.EndpointPickerConfig) bool {
+	return hasPluginType(rawConfig, discoveryk8s.InferencePoolPluginType) ||
+		hasPluginType(rawConfig, discoveryk8s.StaticSelectorPluginType)
+}
+
+// hasPluginType reports whether rawConfig declares any plugin with the given type string.
+func hasPluginType(rawConfig *configapi.EndpointPickerConfig, pluginType string) bool {
+	for _, p := range rawConfig.Plugins {
+		if p.Type == pluginType {
+			return true
+		}
+	}
+	return false
+}
+
+// runErrgroup is the single unified execution path for all modes. K8s plugins
+// (inference-pool, static-selector) create and manage their own ctrl.Manager
+// internally inside disc.Start(). Non-K8s plugins (file, dns) have no K8s
+// dependency at all. The runner itself is always K8s-unaware.
+func (r *Runner) runErrgroup(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
+	return r.runNonK8s(ctx, opts, rawConfig)
+}
+
+// runNonK8s implements the errgroup-based runner used by all discovery modes.
+func (r *Runner) runNonK8s(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
 	logger := log.FromContext(ctx)
 
 	// Pool identity from CLI flags — selector/ports not used; BackendDiscovery manages endpoints.
 	namespace := resolvePoolNamespace(opts.PoolNamespace)
-	poolName := resolveNokubePoolName(opts)
+	poolName := resolveNonK8sPoolName(opts)
 	pool := datalayer.NewEndpointPool(namespace, poolName)
 
 	// Always use new metrics (HTTP polling) in nokube mode.
@@ -829,13 +795,13 @@ func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConf
 	// Guard: k8s-notification-source is not usable without a cluster.
 	for _, p := range r.handle.GetAllPlugins() {
 		if _, ok := p.(fwkdl.NotificationSource); ok {
-			return fmt.Errorf("plugin %q uses k8s-notification-source which is not supported in nokube mode", p.TypedName())
+			return fmt.Errorf("plugin %q uses k8s-notification-source which is not supported without K8s manager", p.TypedName())
 		}
 	}
 
 	// Enforce exactly one BackendDiscovery plugin.
 	if rawConfig.BackendDiscovery == nil {
-		return errors.New("nokube mode requires backendDiscovery to be configured in the config file")
+		return errors.New("backendDiscovery is required when backendDiscovery to be configured in the config file")
 	}
 	var discoveryCount int
 	for _, p := range r.handle.GetAllPlugins() {
@@ -853,6 +819,17 @@ func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConf
 	disc, ok := rawDisc.(discovery.BackendDiscovery)
 	if !ok {
 		return fmt.Errorf("plugin %q does not implement BackendDiscovery", rawConfig.BackendDiscovery.PluginRef)
+	}
+
+	// K8s discovery plugins need the shared Datastore for their reconcilers.
+	if dp, ok := rawDisc.(discoveryk8s.DatastoreProvider); ok {
+		dp.SetDatastore(ds)
+	}
+	// Backward compat: if inference-pool plugin has no poolName in its parameters,
+	// fall back to the --pool-name / --pool-namespace CLI flags.
+	if kp, ok := rawDisc.(*discoveryk8s.InferencePoolDiscovery); ok && kp.PoolName == "" {
+		kp.PoolName = opts.PoolName
+		kp.PoolNamespace = resolvePoolNamespace(opts.PoolNamespace)
 	}
 
 	// Configure datalayer for HTTP metrics polling (no K8s notification binding).
@@ -889,7 +866,7 @@ func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConf
 	svcName := extProcPb.ExternalProcessor_ServiceDesc.ServiceName
 	healthcheck.SetServingStatus(svcName, healthgrpc.HealthCheckResponse_SERVING)
 
-	setupLog.Info("nokube EPP starting",
+	setupLog.Info("EPP starting (non-K8s)",
 		"grpcPort", opts.GRPCPort,
 		"healthPort", opts.GRPCHealthPort,
 		"metricsPort", opts.MetricsPort,
@@ -897,33 +874,30 @@ func (r *Runner) runNokube(ctx context.Context, opts *runserver.Options, rawConf
 		"namespace", namespace)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return disc.Start(gctx, &nokubeDatastoreNotifier{ds: ds}) })
+	g.Go(func() error { return disc.Start(gctx, &datastoreNotifier{ds: ds}) })
 	g.Go(func() error { return r.dlRuntime.StartPollers(gctx) })
-	g.Go(func() error { return nokubeServeGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
-	g.Go(func() error { return nokubeServeGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
-	g.Go(func() error { return nokubeServeMetrics(gctx, opts.MetricsPort) })
+	g.Go(func() error { return serveGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
+	g.Go(func() error { return serveGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
+	g.Go(func() error { return serveMetrics(gctx, opts.MetricsPort) })
 	return g.Wait()
 }
 
-// nokubeDatastoreNotifier adapts datastore.Datastore to discovery.Notifier.
-type nokubeDatastoreNotifier struct {
+// datastoreNotifier adapts datastore.Datastore to discovery.Notifier.
+type datastoreNotifier struct {
 	ds datastore.Datastore
 }
 
-func (n *nokubeDatastoreNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
+func (n *datastoreNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
 	n.ds.BackendUpsert(context.Background(), meta)
 }
 
-func (n *nokubeDatastoreNotifier) Delete(id types.NamespacedName) {
+func (n *datastoreNotifier) Delete(id types.NamespacedName) {
 	n.ds.BackendDelete(id)
 }
 
-func (n *nokubeDatastoreNotifier) MarkSynced() {
-	n.ds.MarkDiscoverySynced()
-}
 
-// nokubeServeGRPC starts a gRPC server and blocks until ctx is cancelled.
-func nokubeServeGRPC(ctx context.Context, srv *grpc.Server, port int, name string) error {
+// serveGRPC starts a gRPC server and blocks until ctx is cancelled.
+func serveGRPC(ctx context.Context, srv *grpc.Server, port int, name string) error {
 	logger := ctrl.Log.WithValues("name", name, "port", port)
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -946,8 +920,8 @@ func nokubeServeGRPC(ctx context.Context, srv *grpc.Server, port int, name strin
 	return nil
 }
 
-// nokubeServeMetrics starts a plain HTTP Prometheus metrics server.
-func nokubeServeMetrics(ctx context.Context, port int) error {
+// serveMetrics starts a plain HTTP Prometheus metrics server.
+func serveMetrics(ctx context.Context, port int) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}

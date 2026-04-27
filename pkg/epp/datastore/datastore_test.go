@@ -1292,7 +1292,7 @@ func TestExtractActivePorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			activePorts := extractActivePorts(tt.pod, tt.validPorts)
+			activePorts := ExtractActivePorts(tt.pod, tt.validPorts)
 			if !reflect.DeepEqual(activePorts, tt.expectedPorts) {
 				t.Errorf("ExtractActivePorts() ports = %v, want %v", activePorts, tt.expectedPorts)
 			}

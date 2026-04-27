@@ -32,8 +32,7 @@ import (
 type BackendDiscovery interface {
 	// Start begins discovery. It should:
 	//   1. Enumerate all known backends, calling notifier.Upsert for each.
-	//   2. Call notifier.MarkSynced once the initial pass is complete.
-	//   3. Continue watching for changes until ctx is cancelled.
+	//   2. Continue watching for changes until ctx is cancelled.
 	// Blocks until ctx is cancelled or a fatal error occurs.
 	Start(ctx context.Context, notifier Notifier) error
 }
@@ -45,7 +44,4 @@ type Notifier interface {
 	Upsert(meta *fwkdl.EndpointMetadata)
 	// Delete removes a backend from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
-	// MarkSynced signals that the initial discovery pass is complete,
-	// unblocking readiness checks.
-	MarkSynced()
 }

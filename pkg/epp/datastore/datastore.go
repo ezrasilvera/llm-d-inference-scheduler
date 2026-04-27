@@ -81,14 +81,16 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
+	// PoolSetStatic sets the pool configuration without triggering a pod resync.
+	// Use this when the selector is fixed at startup and reconcilers will handle
+	// the initial pod enumeration through the controller-runtime reconcile loop.
+	PoolSetStatic(pool *datalayer.EndpointPool)
+
 	// BackendUpsert adds or updates a backend from a non-K8s discovery source.
 	// Unlike PodUpdateOrAddIfNotExist, this takes EndpointMetadata directly, bypassing corev1.Pod.
 	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) bool
 	// BackendDelete removes the backend with the given namespaced name.
 	BackendDelete(id types.NamespacedName)
-	// MarkDiscoverySynced marks the datastore as having received its initial sync from a
-	// non-K8s BackendDiscovery source. Sets PoolHasSynced() = true in nokube mode.
-	MarkDiscoverySynced()
 
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
@@ -119,8 +121,6 @@ type datastore struct {
 	// mu is used to synchronize access to pool, objectives, and rewrites.
 	mu   sync.RWMutex
 	pool *datalayer.EndpointPool
-	// discoverySynced is set to true by MarkDiscoverySynced, used in nokube mode.
-	discoverySynced bool
 	// key: InferenceObjective name, value: *InferenceObjective
 	objectives map[string]*v1alpha2.InferenceObjective
 	// modelRewrites store for InferenceModelRewrite objects.
@@ -205,7 +205,7 @@ func (ds *datastore) PoolGet() (*datalayer.EndpointPool, error) {
 func (ds *datastore) PoolHasSynced() bool {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.pool != nil || ds.discoverySynced
+	return ds.pool != nil
 }
 
 func (ds *datastore) PoolLabelsMatch(podLabels map[string]string) bool {
@@ -316,7 +316,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 		modelServerMetricsPort = int(ds.modelServerMetricsPort)
 	}
 	pods := []*fwkdl.EndpointMetadata{}
-	activePorts := extractActivePorts(pod, pool.TargetPorts)
+	activePorts := ExtractActivePorts(pod, pool.TargetPorts)
 	for idx, port := range pool.TargetPorts {
 		if !activePorts.Has(port) {
 			continue
@@ -327,7 +327,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 		}
 		pods = append(pods,
 			&fwkdl.EndpointMetadata{
-				NamespacedName: createEndpointNamespacedName(pod, idx),
+				NamespacedName: CreateEndpointNamespacedName(pod, idx),
 				PodName:        pod.Name,
 				Address:        pod.Status.PodIP,
 				Port:           strconv.Itoa(port),
@@ -371,7 +371,7 @@ func (ds *datastore) podUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.P
 			continue
 		}
 
-		namespacedName := createEndpointNamespacedName(pod, idx)
+		namespacedName := CreateEndpointNamespacedName(pod, idx)
 		if ep, ok := ds.pods.Load(namespacedName); ok {
 			ds.pods.Delete(namespacedName)
 			ds.epf.ReleaseEndpoint(ep.(fwkdl.Endpoint))
@@ -390,6 +390,14 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
+}
+
+// PoolSetStatic sets the pool without a pod resync. Use this when the selector
+// is fixed at startup and reconcilers handle the initial pod enumeration.
+func (ds *datastore) PoolSetStatic(pool *datalayer.EndpointPool) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	ds.pool = pool
 }
 
 // BackendUpsert adds or updates a backend from a non-K8s discovery source using EndpointMetadata directly.
@@ -416,13 +424,6 @@ func (ds *datastore) BackendDelete(id types.NamespacedName) {
 	}
 }
 
-// MarkDiscoverySynced marks the datastore as having received its initial non-K8s discovery sync.
-func (ds *datastore) MarkDiscoverySynced() {
-	ds.mu.Lock()
-	defer ds.mu.Unlock()
-	ds.discoverySynced = true
-}
-
 func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) error {
 	logger := log.FromContext(ctx)
 	podList := &corev1.PodList{}
@@ -443,7 +444,7 @@ func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) err
 		namespacedName := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
 		// Calculate expected endpoint names based on current targetPorts.
 		for idx := range ds.pool.TargetPorts {
-			activeEndpoints.Insert(createEndpointNamespacedName(&pod, idx))
+			activeEndpoints.Insert(CreateEndpointNamespacedName(&pod, idx))
 		}
 		if !ds.podUpdateOrAddIfNotExist(ctx, &pod, ds.pool) {
 			logger.V(logutil.DEFAULT).Info("Pod added", "name", namespacedName)
@@ -468,7 +469,7 @@ func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) err
 }
 
 // extractActivePorts extracts the active ports from a pod's annotations.
-func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
+func ExtractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
 	allPorts := sets.New(targetPorts...)
 	annotations := pod.GetAnnotations()
 	portsAnnotation, ok := annotations[activePortsAnnotation]
@@ -490,9 +491,24 @@ func extractActivePorts(pod *corev1.Pod, targetPorts []int) sets.Set[int] {
 
 // createEndpointNamespacedName creates a namespaced name for an endpoint based on pod and rank index.
 // This ensures consistent naming between PodUpdateOrAddIfNotExist and podResyncAll.
-func createEndpointNamespacedName(pod *corev1.Pod, idx int) types.NamespacedName {
+func CreateEndpointNamespacedName(pod *corev1.Pod, idx int) types.NamespacedName {
 	return types.NamespacedName{
 		Name:      pod.Name + "-rank-" + strconv.Itoa(idx),
 		Namespace: pod.Namespace,
 	}
+}
+
+// DatastoreNotifier implements fwkdiscovery.Notifier by bridging calls to a Datastore.
+// Used by the K8s discovery plugins and the backward-compat K8s runner path so that
+// PodReconciler can communicate backend changes through the unified Notifier contract.
+type DatastoreNotifier struct {
+	DS Datastore
+}
+
+func (n *DatastoreNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
+	n.DS.BackendUpsert(context.Background(), meta)
+}
+
+func (n *DatastoreNotifier) Delete(id types.NamespacedName) {
+	n.DS.BackendDelete(id)
 }

@@ -1,28 +1,71 @@
 # llm-d Inference Scheduler: nokube Mode
 
+## Architecture
+
+The discovery plugin architecture is documented in
+[`docs/images/discovery-arch.drawio`](docs/images/discovery-arch.drawio)
+(open with [diagrams.net](https://app.diagrams.net)).
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  EPP Process  (single binary, single runner)                            │
+│                                                                         │
+│  ┌─────────── Runner — errgroup ──────────────────────────────────┐    │
+│  │  disc.Start()  dlRuntime.StartPollers()  serveGRPC  Metrics    │    │
+│  └─────────────────────┬──────────────────────────────────────────┘    │
+│                         │                                               │
+│          ┌──────────────▼──────────────┐                               │
+│          │   BackendDiscovery interface │                               │
+│          │   Start(ctx, Notifier) error │                               │
+│          └──────┬──────────────┬───────┘                               │
+│                 │               │                                       │
+│    ┌────────────▼──────┐  ┌────▼────────────────────────────────────┐  │
+│    │  Non-K8s plugins  │  │  K8s plugins (own ctrl.Manager)         │  │
+│    │  (no API server)  │  │                                          │  │
+│    │                   │  │  inference-pool-backend-discovery        │  │
+│    │  file-backend-    │  │   ctrl.Manager owns:                    │  │
+│    │  discovery        │  │    InferencePoolReconciler               │  │
+│    │                   │  │    PodReconciler                         │  │
+│    │  dns-backend-     │  │    InferenceObjectiveReconciler (opt)    │  │
+│    │  discovery        │  │    InferenceModelRewriteReconciler (opt) │  │
+│    │                   │  │                                          │  │
+│    └─────────┬─────────┘  │  static-selector-backend-discovery      │  │
+│              │             │   ctrl.Manager owns:                    │  │
+│              │             │    PodReconciler                         │  │
+│              │             └──────────────────┬───────────────────────┘  │
+│              │                                │                          │
+│              └────────────────┬───────────────┘                          │
+│                               │ Notifier (Upsert / Delete / MarkSynced)  │
+│                       ┌───────▼────────────────────┐                    │
+│                       │         Datastore           │                    │
+│                       │  endpoints | pool | obj     │                    │
+│                       │  rewrites                   │                    │
+│                       └───────────┬─────────────────┘                   │
+│                                   │                                      │
+│                       ┌───────────▼─────────────────┐                   │
+│                       │   Director / Scheduler       │                   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Overview
 
-The inference scheduler (EPP) normally runs inside a Kubernetes cluster. It watches
-`InferencePool` and `Pod` resources via the K8s API server to discover inference backends
-and uses `controller-runtime` reconcilers for lifecycle management.
+The inference scheduler (EPP) discovers backends via a `BackendDiscovery` plugin. All
+four plugins ship in the same binary and image. The plugin type in the config determines
+whether a Kubernetes API server is required at runtime.
 
-**nokube mode** lets the EPP run on any machine (bare metal, a VM, a developer laptop)
-without a Kubernetes API server. Backend discovery is handled by a pluggable
-`BackendDiscovery` plugin instead of watching K8s pods.
+Key differences by plugin type:
 
-Key differences between modes:
-
-| Capability | K8s mode | nokube mode |
+| Capability | K8s plugins (inference-pool, static-selector) | Non-K8s plugins (file, dns) |
 |---|---|---|
-| Backend discovery | Live pod watch via K8s API (`PodReconciler`) | `BackendDiscovery` plugin (file, HTTP, gRPC, DNS) |
-| Pool configuration | Reconciled live from `InferencePool` CRD | CLI flags at startup (`--pool-name`, `--pool-namespace`) |
-| `InferenceObjective` (request priority) | Reconciled live from CRD | **Static:** loaded once from `staticConfig` at startup |
-| `InferenceModelRewrite` (model aliasing) | Reconciled live from CRD | **Static:** loaded once from `staticConfig` at startup |
-| Lifecycle manager | `ctrl.Manager` | `errgroup` |
-| High availability / leader election | Supported (K8s leases) | Not supported |
+| Backend discovery | Pod watch via K8s API — owns `ctrl.Manager` internally | File or DNS polling — no K8s dependency |
+| Pool configuration | Reconciled live from `InferencePool` CRD | CLI flags at startup |
+| `InferenceObjective` | Reconciled live (inference-pool only) | Static via `staticConfig` |
+| `InferenceModelRewrite` | Reconciled live (inference-pool only) | Static via `staticConfig` |
+| Lifecycle inside plugin | `ctrl.Manager` | N/A — runner errgroup handles everything |
+| HA / leader election | Supported (inference-pool, `leaderElection: true`) | Not supported |
 
 Scheduling algorithms, flow control, metrics polling from inference engines, Prometheus
-metrics, TLS, and health checking all work identically in both modes.
+metrics, TLS, and health checking all work identically regardless of discovery plugin.
 
 ---
 
@@ -40,36 +83,31 @@ Two levels of Kubernetes decoupling are possible.
 
 ### Level 1: runtime independence only (current approach)
 
-The binary is compiled with K8s Go packages but does **not contact a K8s API server** at
-runtime when running in nokube mode.
+The binary compiles with K8s Go packages. Whether a K8s API server is contacted at
+runtime depends entirely on which `BackendDiscovery` plugin is configured:
 
-- `ctrl.GetConfig()` and `ctrl.NewManager()` are not called.
-- Reconcilers (`PodReconciler`, `InferencePoolReconciler`) do not start.
-- `BackendDiscovery` replaces pod watching.
-- Lifecycle is managed by `errgroup` instead of `ctrl.Manager`.
-- K8s packages (`k8s.io/api`, `sigs.k8s.io/controller-runtime`) are still compiled into
-  the binary but only used for logging helpers, which have no API server dependency.
+- **Non-K8s plugins** (file, dns): `ctrl.GetConfig()` and `ctrl.NewManager()` are never
+  called. No reconcilers start. The runner manages everything with `errgroup`.
+- **K8s plugins** (inference-pool, static-selector): `ctrl.GetConfig()` and
+  `ctrl.NewManager()` are called **inside the plugin's `Start()`** method. Reconcilers
+  run inside that internal manager. The runner's errgroup just calls `disc.Start()` and
+  the plugin handles all K8s lifecycle internally.
 
-**Single binary, two execution paths.** Mode is selected automatically: if
-`backendDiscovery` is present in the config, the nokube path runs; otherwise the standard
-K8s path runs. `cmd/epp-nokube/` is a 15-line entrypoint that calls the same runner with
-nokube mode pre-selected.
+The runner itself is always a single errgroup path. There is no K8s-specific code in the
+runner's `Run()` function.
 
 Code structure:
 ```
 cmd/epp/runner/runner.go
-  setupCommon()   <- shared by both paths (~185 lines)
-  runK8s()        <- K8s-specific (~115 lines)
-  runNokube()     <- nokube-specific (~90 lines)
+  runErrgroup() / runNonK8s()  <- single path for all plugins (~90 lines)
 
-cmd/epp/main.go          <- unchanged, auto-detects mode from config
-cmd/epp-nokube/main.go   <- 15-line shim: runner.WithNokubeMode().Run(ctx)
+cmd/epp/main.go  <- single entry point, mode auto-detected from config
 ```
 
 ### Level 2: full import isolation
 
 The binary has no K8s package imports at all. It is built from a fully separate entry
-point (`cmd/epp-nokube/`) whose import graph excludes `k8s.io/api/core/v1`,
+point (separate `cmd/`) whose import graph excludes `k8s.io/api/core/v1`,
 `sigs.k8s.io/controller-runtime`, and the K8s client.
 
 This requires a fully independent runner (~310 lines) that re-implements lifecycle
@@ -78,11 +116,11 @@ exists in the K8s runner, resulting in ~185 lines of duplication.
 
 Code size comparison:
 
-| | Level 1 (selected) | Level 2 |
+| | Level 1 (current) | Level 2 |
 |---|---|---|
-| `cmd/epp/runner/runner.go` | ~820 lines | 731 lines |
-| `cmd/epp-nokube/runner/runner.go` | ~15 lines (shim) | 310 lines (full runner) |
-| Total runner code | ~835 lines | 1041 lines |
+| `cmd/epp/runner/runner.go` | ~850 lines (both paths) | 731 lines |
+| Separate nokube runner/binary | none | 310-line independent runner |
+| Total runner code | ~850 lines | ~1041 lines |
 | Duplicated setup block | 0 | ~185 lines |
 
 ### Comparison
@@ -93,12 +131,11 @@ Code size comparison:
 | No K8s package imports in binary | no | yes |
 | Binary size | ~10 MB larger | smaller |
 | Supply-chain / SBOM cleanliness | K8s packages present | clean |
-| Code duplication | ~0 lines | ~185 lines |
-| Separate binary entrypoint | thin shim | full independent runner |
-| Separate `Dockerfile.epp-nokube` | yes | yes |
+| Code duplication | 0 | ~185 lines |
+| Separate binary/image | no | yes |
 
-Both levels produce a separate `epp-nokube` container image that works without a cluster.
-Level 2 gives a cleaner binary; Level 1 gives simpler code with no duplication.
+Level 1 gives a single binary with no duplication. Level 2 gives a cleaner import
+graph at the cost of a separate binary and ~185 duplicated lines.
 
 </details>
 
@@ -109,24 +146,27 @@ Level 2 gives a cleaner binary; Level 1 gives simpler code with no duplication.
 <details>
 <summary>Show</summary>
 
-**Single image:** one image that runs in both K8s and nokube modes, selected by the
-presence or absence of `backendDiscovery` in the config file. Simpler distribution but the
-image name gives no signal about whether a cluster is required.
+**Single image:** one image that runs in both K8s and non-K8s modes, selected by the
+`backendDiscovery` plugin type in the config file. One artifact to build, sign, and push.
+Mode is transparent from the config.
 
-**Two images:** separate `epp` (K8s) and `epp-nokube` images built from the same codebase
-via separate Dockerfiles. Each image does one thing and the name is self-documenting.
+**Two images:** separate `epp` (K8s) and a dedicated non-K8s image built from separate
+Dockerfiles. Each image does one thing; the name is self-documenting. Requires two tag
+streams and two CI jobs.
 
-### Selected option: two images
+### Selected option: single image
 
-1. **Naming clarity.** `epp-nokube` tells operators immediately that no cluster is
-   required. A misconfigured `epp` image that cannot reach an API server fails at startup;
-   `epp-nokube` never attempts the connection.
-2. **Deployment scenario alignment.** nokube targets bare-metal, edge, and VM deployments
-   where having K8s client packages in the binary may be undesirable even at Level 1.
-3. **Future-proofing.** The two-image model leaves the door open to Level 2 hardening
-   (full import removal) without changing the deployment model or image names.
-4. **Security posture.** Separate images allow separate vulnerability scanning policies,
-   separate pod security admission profiles, and separate SBOM attestations.
+The current implementation uses a single `epp` image. Mode is determined entirely by
+configuration:
+
+- Non-K8s backends configured (`file-backend-discovery`, `dns-backend-discovery`)
+  and `backendDiscovery` set in config: non-K8s execution path, no API server contact.
+- K8s backends configured (`inference-pool-backend-discovery`,
+  `static-selector-backend-discovery`) or no `backendDiscovery` at all: K8s execution
+  path, full cluster integration.
+
+If Level 2 import isolation becomes a requirement in the future, the two-image model
+can be adopted without changing the config format or discovery plugin interfaces.
 
 </details>
 
@@ -159,7 +199,7 @@ type Notifier interface {
 }
 ```
 
-`BackendDiscovery` plugins call the notifier; `nokubeDatastoreNotifier` in
+`BackendDiscovery` plugins call the notifier; `datastoreNotifier` in
 `cmd/epp/runner/runner.go` is the concrete implementation that bridges notifier calls to
 the datastore (`BackendUpsert`, `BackendDelete`, `MarkDiscoverySynced`).
 
@@ -257,80 +297,7 @@ backendDiscovery:
   pluginRef: file-discovery
 ```
 
-### 2. HTTP polling (`http-backend-discovery`)
-
-Polls a REST endpoint on a configurable interval. The endpoint must return a JSON array
-of backend objects. On each poll the full list is diffed against the current set: new
-entries are upserted and missing entries are deleted.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `url` | string | required | URL to GET; must return a JSON array of backend objects |
-| `refreshInterval` | duration (nanoseconds) | 30s | How often to poll |
-
-**Response format:** a JSON array of the same structure as the file backend entries:
-
-```json
-[
-  {"name": "vllm-0", "namespace": "default", "address": "10.0.0.1", "port": "8000"},
-  {"name": "vllm-1", "address": "10.0.0.2", "port": "8000", "labels": {"model": "llama3"}}
-]
-```
-
-**Config example:**
-
-```yaml
-plugins:
-  - type: http-backend-discovery
-    name: http-discovery
-    parameters:
-      url: "http://registry.inference.svc:8080/backends"
-      refreshInterval: 15000000000    # 15s in nanoseconds
-
-backendDiscovery:
-  pluginRef: http-discovery
-```
-
-### 3. gRPC streaming (`grpc-backend-discovery`)
-
-Subscribes to a gRPC server-streaming RPC that pushes `BackendEvent` messages. Reconnects
-with exponential backoff (2s to 30s cap) on connection failure.
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `address` | string | required | `host:port` of the gRPC discovery server |
-| `insecure` | bool | `true` | Disable TLS verification |
-
-**Wire format (`BackendEvent` JSON):**
-
-```json
-{"type": "UPSERT", "name": "vllm-0", "namespace": "default",
- "address": "10.0.0.1", "port": "8000", "labels": {"model": "llama3"}}
-{"type": "DELETE", "name": "vllm-0", "namespace": "default"}
-```
-
-The server must implement the streaming RPC at
-`/discovery.BackendDiscoveryService/WatchBackends`.
-
-**Config example:**
-
-```yaml
-plugins:
-  - type: grpc-backend-discovery
-    name: grpc-discovery
-    parameters:
-      address: "discovery-server.inference.svc:50051"
-      insecure: false
-
-backendDiscovery:
-  pluginRef: grpc-discovery
-```
-
-### 4. DNS (`dns-backend-discovery`)
+### 2. DNS (`dns-backend-discovery`)
 
 Resolves DNS records on a polling interval and treats each resolved address as a backend.
 Supports SRV records (preferred) and A/AAAA records.
@@ -387,6 +354,69 @@ backendDiscovery:
   pluginRef: dns-discovery
 ```
 
+### 3. K8s InferencePool (`inference-pool-backend-discovery`)
+
+Discovers backends by watching Kubernetes pods whose label selector and target ports are
+defined by an `InferencePool` CRD. This is the standard K8s mode. The runner starts the
+full set of CRD reconcilers: `InferencePool`, `InferenceObjective`, `InferenceModelRewrite`,
+and `Pod`.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `poolName` | string | from `--pool-name` flag | Name of the `InferencePool` resource |
+| `poolNamespace` | string | from `--pool-namespace` flag | Namespace of the `InferencePool` resource |
+| `poolGroup` | string | `"inference.networking.k8s.io"` | API group of the `InferencePool` CRD |
+| `leaderElection` | bool | `false` | Enable K8s leader election for HA |
+
+**Config example:**
+
+```yaml
+plugins:
+  - type: inference-pool-backend-discovery
+    name: k8s-discovery
+    parameters:
+      poolName: my-pool
+      poolNamespace: default
+
+backendDiscovery:
+  pluginRef: k8s-discovery
+```
+
+If `backendDiscovery` is absent from the config entirely, the runner defaults to
+`inference-pool-backend-discovery` using the `--pool-name` and `--pool-namespace` CLI flags
+for backward compatibility with existing deployments.
+
+### 4. K8s static selector (`static-selector-backend-discovery`)
+
+Discovers backends by watching Kubernetes pods matching a label selector from plugin
+parameters. No `InferencePool` CRD is required. Useful when deploying the EPP alongside
+vLLM pods without the full Gateway API Inference Extension CRD stack.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `endpointSelector` | string | required | Label selector for vLLM pods (e.g. `"app=vllm"`) |
+| `endpointTargetPorts` | []int | required | Target ports on matched pods |
+| `namespace` | string | `"default"` | Namespace to watch pods in |
+
+**Config example:**
+
+```yaml
+plugins:
+  - type: static-selector-backend-discovery
+    name: static-k8s-discovery
+    parameters:
+      endpointSelector: "app=vllm,env=prod"
+      endpointTargetPorts: [8000]
+      namespace: inference
+
+backendDiscovery:
+  pluginRef: static-k8s-discovery
+```
+
 </details>
 
 ---
@@ -396,9 +426,11 @@ backendDiscovery:
 <details>
 <summary>Show</summary>
 
-In K8s mode, `InferenceObjective` (request priority) and `InferenceModelRewrite` (model
-name aliasing) are reconciled from CRDs at runtime. In nokube mode they are loaded once
-at startup from the `staticConfig` section of the config file.
+For `file-backend-discovery` and `dns-backend-discovery`, `InferenceObjective` and
+`InferenceModelRewrite` are loaded once at startup from the `staticConfig` section of the
+config file. For `inference-pool-backend-discovery`, these are reconciled live from their
+K8s CRDs when present; `staticConfig` is still applied first and acts as a fallback if
+the CRDs are not installed.
 
 Both fields are optional:
 - Without `InferenceObjective`, all requests use priority `0`.
@@ -451,23 +483,24 @@ The `spec.poolRef` field that these CRDs normally require is ignored in nokube m
 - TLS / secure serving
 - Health checking
 
-### Changed: same feature, static instead of live
+### Varies by plugin
 
-| Feature | K8s mode | nokube mode |
-|---|---|---|
-| Backend discovery | Live pod watch via K8s API | BackendDiscovery plugin |
-| InferenceObjective / priority | Live CRD reconciliation | `staticConfig` at startup |
-| InferenceModelRewrite | Live CRD reconciliation | `staticConfig` at startup |
-| Pool config (selector, ports) | Updated live from `InferencePool` CRD | CLI flags at startup |
+| Feature | inference-pool | static-selector | file / dns |
+|---|---|---|---|
+| Backend discovery | Live pod watch (K8s) | Live pod watch (K8s) | File or DNS polling |
+| Pool configuration | Live from `InferencePool` CRD | From plugin parameters | CLI flags |
+| InferenceObjective / priority | Live CRD reconciliation | `staticConfig` only | `staticConfig` only |
+| InferenceModelRewrite | Live CRD reconciliation | `staticConfig` only | `staticConfig` only |
+| HA / leader election | Yes (`leaderElection: true`) | No | No |
+| K8s API server required | Yes | Yes | No |
 
-### Not available
+### Not available in any mode
 
 | Feature | Reason |
 |---|---|
-| HA / leader election | Requires K8s leases |
-| Dynamic pool reconfiguration at runtime | Pool is fixed at startup |
-| `k8s-notification-source` plugins | No K8s API server; config validation fails fast |
-| Controller-runtime reconciler metrics | No reconcilers running |
+| Dynamic pool reconfiguration at runtime | Pool is fixed at plugin startup |
+| `k8s-notification-source` datalayer plugins | Not supported; config validation fails fast |
+| Controller-runtime internal metrics | Not exposed (runner's Prometheus server handles metrics) |
 
 </details>
 
@@ -523,7 +556,7 @@ staticConfig:
 
 ---
 
-## Running the nokube image
+## Running the EPP
 
 <details>
 <summary>Show</summary>
@@ -533,7 +566,7 @@ docker run --rm \
   -v /path/to/config.yaml:/etc/epp/config.yaml \
   -v /path/to/backends.yaml:/etc/epp/backends.yaml \
   -p 9002:9002 -p 9003:9003 -p 9090:9090 \
-  ghcr.io/llm-d/llm-d-inference-scheduler-nokube:dev \
+  ghcr.io/llm-d/llm-d-inference-scheduler:dev \
   --config-file /etc/epp/config.yaml \
   --pool-name my-pool \
   --pool-namespace default \
@@ -553,12 +586,14 @@ The EPP is agnostic to how vLLM is deployed. It only needs an IP address, a port
 and a `/metrics` endpoint to scrape. The choice of deployment model affects only
 which `BackendDiscovery` plugin you use.
 
-| vLLM deployment | K8s EPP | nokube EPP | Recommended discovery |
-|---|---|---|---|
-| Kubernetes pods | yes | yes | K8s mode: automatic via `PodReconciler`. nokube: DNS (headless service) or HTTP. |
-| Docker containers | no | yes | File discovery or HTTP polling against a registration sidecar |
-| Bare-metal processes | no | yes | File discovery (static or written by vLLM on startup) |
-| Slurm job steps | no | yes | File discovery (job prologue writes the endpoint list) |
+| vLLM deployment | Recommended discovery plugin |
+|---|---|
+| Kubernetes pods with InferencePool CRD | `inference-pool-backend-discovery` |
+| Kubernetes pods without InferencePool CRD | `static-selector-backend-discovery` |
+| Docker containers | `file-backend-discovery` (shared volume) |
+| Bare-metal processes | `file-backend-discovery` (registration script) |
+| Slurm job steps | `file-backend-discovery` (shared filesystem) |
+| Any environment with DNS SRV records | `dns-backend-discovery` |
 
 ### K8s pods
 
@@ -636,7 +671,7 @@ beyond vLLM, Envoy, and the EPP binary.
 
 - A shared filesystem visible to both the head node and compute nodes (NFS, Lustre, GPFS)
 - Envoy proxy binary or container on the head/service node
-- `epp-nokube` binary on the head/service node
+- `epp` binary on the head/service node
 
 ### Step 1: initialize the backends file
 
@@ -687,7 +722,7 @@ backendDiscovery:
 ### Step 3: start the EPP on the head node
 
 ```bash
-./epp-nokube \
+./epp \
   --config-file /shared/llm-d/epp-config.yaml \
   --pool-name slurm-pool \
   --secure-serving=false \

@@ -1,0 +1,156 @@
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- EPP Process outer container -->
+    <mxCell id="2" value="EPP Process (single binary)" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="20" y="20" width="1360" height="860" as="geometry" />
+    </mxCell>
+
+    <!-- Runner box -->
+    <mxCell id="3" value="Runner — single errgroup" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" vertex="1" parent="2">
+      <mxGeometry x="80" y="50" width="1200" height="60" as="geometry" />
+    </mxCell>
+    <mxCell id="4" value="disc.Start(ctx, notifier)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="120" y="70" width="200" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="5" value="dlRuntime.StartPollers()" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="360" y="70" width="200" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="6" value="serveGRPC (ext-proc)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="600" y="70" width="180" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="7" value="serveGRPC (health)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="820" y="70" width="180" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="8" value="serveMetrics" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="1040" y="70" width="180" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- BackendDiscovery interface -->
+    <mxCell id="10" value="&lt;b&gt;BackendDiscovery&lt;/b&gt; interface&lt;br/&gt;Start(ctx, Notifier) error" style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="2">
+      <mxGeometry x="480" y="160" width="340" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- Arrow from runner to interface -->
+    <mxCell id="11" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="3" target="10" parent="2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Non-K8s plugins group -->
+    <mxCell id="20" value="Non-K8s plugins (no API server needed)" style="swimlane;startSize=25;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="60" y="270" width="500" height="200" as="geometry" />
+    </mxCell>
+
+    <!-- File plugin -->
+    <mxCell id="21" value="&lt;b&gt;file-backend-discovery&lt;/b&gt;&lt;br/&gt;Reads backends.yaml&lt;br/&gt;watchFile: fsnotify hot-reload&lt;br/&gt;Diff on each reload → Upsert/Delete" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="20">
+      <mxGeometry x="30" y="50" width="200" height="110" as="geometry" />
+    </mxCell>
+
+    <!-- DNS plugin -->
+    <mxCell id="22" value="&lt;b&gt;dns-backend-discovery&lt;/b&gt;&lt;br/&gt;Queries DNS SRV or A records&lt;br/&gt;Polls on refreshInterval&lt;br/&gt;Diff per poll → Upsert/Delete" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="20">
+      <mxGeometry x="270" y="50" width="200" height="110" as="geometry" />
+    </mxCell>
+
+    <!-- K8s plugins group -->
+    <mxCell id="30" value="K8s plugins (own ctrl.Manager internally)" style="swimlane;startSize=25;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="640" y="270" width="700" height="330" as="geometry" />
+    </mxCell>
+
+    <!-- InferencePool plugin -->
+    <mxCell id="31" value="&lt;b&gt;inference-pool-backend-discovery&lt;/b&gt;" style="swimlane;startSize=25;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="30">
+      <mxGeometry x="30" y="45" width="300" height="255" as="geometry" />
+    </mxCell>
+
+    <mxCell id="32" value="ctrl.GetConfig() + ctrl.NewManager()" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="31">
+      <mxGeometry x="20" y="35" width="260" height="30" as="geometry" />
+    </mxCell>
+
+    <mxCell id="33" value="InferencePoolReconciler&lt;br/&gt;→ sets pool selector &amp; ports" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="31">
+      <mxGeometry x="20" y="80" width="260" height="35" as="geometry" />
+    </mxCell>
+    <mxCell id="34" value="PodReconciler&lt;br/&gt;→ calls Datastore.PodUpdateOrAdd()" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="31">
+      <mxGeometry x="20" y="125" width="260" height="35" as="geometry" />
+    </mxCell>
+    <mxCell id="35" value="InferenceObjectiveReconciler (if CRD present)" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="31">
+      <mxGeometry x="20" y="170" width="260" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="36" value="InferenceModelRewriteReconciler (if CRD present)" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="31">
+      <mxGeometry x="20" y="210" width="260" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- StaticSelector plugin -->
+    <mxCell id="40" value="&lt;b&gt;static-selector-backend-discovery&lt;/b&gt;" style="swimlane;startSize=25;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="30">
+      <mxGeometry x="370" y="45" width="300" height="200" as="geometry" />
+    </mxCell>
+
+    <mxCell id="41" value="ctrl.GetConfig() + ctrl.NewManager()" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="40">
+      <mxGeometry x="20" y="35" width="260" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="42" value="PoolSetStatic(pool)&lt;br/&gt;→ pool from plugin parameters" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="40">
+      <mxGeometry x="20" y="80" width="260" height="35" as="geometry" />
+    </mxCell>
+    <mxCell id="43" value="PodReconciler&lt;br/&gt;→ calls Datastore.PodUpdateOrAdd()" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="40">
+      <mxGeometry x="20" y="125" width="260" height="35" as="geometry" />
+    </mxCell>
+    <mxCell id="44" value="No InferencePool / Objective / ModelRewrite CRDs" style="rounded=1;whiteSpace=wrap;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="40">
+      <mxGeometry x="20" y="165" width="260" height="25" as="geometry" />
+    </mxCell>
+
+    <!-- Arrows from interface to plugin groups -->
+    <mxCell id="50" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="10" target="20" parent="2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="51" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="10" target="30" parent="2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- Notifier bridge -->
+    <mxCell id="60" value="&lt;b&gt;datastoreNotifier&lt;/b&gt; (Notifier interface)&lt;br/&gt;Upsert → BackendUpsert | Delete → BackendDelete | MarkSynced → MarkDiscoverySynced" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="300" y="640" width="780" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- Arrows from plugins to notifier -->
+    <mxCell id="61" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="20" target="60" parent="2">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="310" y="620" />
+          <mxPoint x="690" y="620" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="62" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="30" target="60" parent="2">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="990" y="620" />
+          <mxPoint x="690" y="620" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Datastore -->
+    <mxCell id="70" value="&lt;b&gt;Datastore&lt;/b&gt;&lt;br/&gt;endpoints (pods) | pool | objectives | model rewrites" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="2">
+      <mxGeometry x="460" y="740" width="460" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- Arrow notifier to datastore -->
+    <mxCell id="71" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="60" target="70" parent="2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- staticConfig label -->
+    <mxCell id="80" value="staticConfig (objectives, modelRewrites)&lt;br/&gt;loaded at startup for file/dns plugins" style="text;html=1;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;align=center;" vertex="1" parent="2">
+      <mxGeometry x="460" y="710" width="460" height="30" as="geometry" />
+    </mxCell>
+
+    <!-- Director box -->
+    <mxCell id="90" value="Director / Scheduler&lt;br/&gt;(uses Datastore.PodList, ObjectiveGet, ModelRewriteGet, PoolGet)" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="2">
+      <mxGeometry x="460" y="820" width="460" height="25" as="geometry" />
+    </mxCell>
+    <mxCell id="91" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="70" target="90" parent="2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>

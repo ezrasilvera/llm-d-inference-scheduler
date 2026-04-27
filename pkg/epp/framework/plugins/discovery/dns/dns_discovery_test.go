@@ -37,7 +37,6 @@ type fakeNotifier struct {
 	mu      sync.Mutex
 	upserts []*fwkdl.EndpointMetadata
 	deletes []types.NamespacedName
-	synced  bool
 }
 
 func (n *fakeNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
@@ -52,11 +51,6 @@ func (n *fakeNotifier) Delete(id types.NamespacedName) {
 	n.deletes = append(n.deletes, id)
 }
 
-func (n *fakeNotifier) MarkSynced() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.synced = true
-}
 
 // fakeResolver is a test double for the dnsResolver interface.
 type fakeResolver struct {
@@ -304,12 +298,12 @@ func TestStart_AMode_DiffOnPoll(t *testing.T) {
 
 	go d.Start(ctx, notifier) //nolint:errcheck
 
-	// Wait for initial sync with two backends.
+	// Wait for initial load with two backends.
 	require.Eventually(t, func() bool {
 		notifier.mu.Lock()
 		defer notifier.mu.Unlock()
-		return notifier.synced
-	}, time.Second, 10*time.Millisecond)
+		return len(notifier.upserts) >= 2
+	}, time.Second, 10*time.Millisecond, "initial backends not loaded")
 
 	// Now one backend disappears.
 	resolver.mu.Lock()
@@ -326,35 +320,6 @@ func TestStart_AMode_DiffOnPoll(t *testing.T) {
 	notifier.mu.Lock()
 	defer notifier.mu.Unlock()
 	assert.Len(t, notifier.deletes, 1)
-}
-
-// TestStart_MarkSynced verifies that MarkSynced is called even when the initial result is empty.
-func TestStart_MarkSynced(t *testing.T) {
-	resolver := &fakeResolver{hostMap: map[string][]string{}}
-	d := &DNSDiscovery{
-		typedName: fwkplugin.TypedName{Type: PluginType, Name: "test"},
-		p: params{
-			DNSMode:         ModeA,
-			Host:            "empty.svc.local",
-			Port:            "8000",
-			Namespace:       "default",
-			RefreshInterval: time.Hour,
-		},
-		resolver: resolver,
-	}
-
-	notifier := &fakeNotifier{}
-	ctx, cancel := context.WithCancel(context.Background())
-
-	go d.Start(ctx, notifier) //nolint:errcheck
-
-	require.Eventually(t, func() bool {
-		notifier.mu.Lock()
-		defer notifier.mu.Unlock()
-		return notifier.synced
-	}, time.Second, 10*time.Millisecond, "MarkSynced not called")
-
-	cancel()
 }
 
 // TestLabelsAttached verifies that configured labels are propagated to all discovered backends.

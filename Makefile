@@ -22,8 +22,6 @@ IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(PROJECT_NAME)
 EPP_TAG ?= dev
 export EPP_IMAGE ?= $(IMAGE_TAG_BASE):$(EPP_TAG)
 
-EPP_NOKUBE_TAG ?= dev
-export EPP_NOKUBE_IMAGE ?= $(IMAGE_TAG_BASE)-nokube:$(EPP_NOKUBE_TAG)
 
 SIDECAR_TAG ?= dev
 SIDECAR_IMAGE_TAG_BASE ?= $(IMAGE_REGISTRY)/$(SIDECAR_IMAGE_NAME)
@@ -151,10 +149,8 @@ sidecar_TEST_PACKAGES = ./pkg/sidecar/...
 
 # Internal variables for generic targets
 epp_IMAGE = $(EPP_IMAGE)
-epp_nokube_IMAGE = $(EPP_NOKUBE_IMAGE)
 sidecar_IMAGE = $(SIDECAR_IMAGE)
 epp_NAME = epp
-epp_nokube_NAME = epp-nokube
 sidecar_NAME = $(SIDECAR_NAME)
 
 
@@ -326,25 +322,17 @@ coverage-compare: image-build-builder ## Compare coverage vs baseline (BASELINE_
 ##@ Build
 
 .PHONY: build
-build: build-epp build-epp-nokube build-sidecar ## Build the project for epp, epp-nokube and sidecar
+build: build-epp build-sidecar ## Build the project for epp and sidecar
 
 .PHONY: build-%
 build-%: image-build-builder ## Build the project
 	@printf "\033[33;1m==== Building $* ====\033[0m\n"
 	$(BUILDER_RUN) 'go build -o bin/$($*_NAME) cmd/$($*_NAME)/main.go'
 
-.PHONY: build-epp-nokube
-build-epp-nokube: image-build-builder ## Build the epp-nokube (non-K8s) binary
-	@printf "\033[33;1m==== Building epp-nokube ====\033[0m\n"
-	$(BUILDER_RUN) 'go build -o bin/$(epp_nokube_NAME) cmd/epp-nokube/main.go'
-
 ##@ Container image Build/Push/Pull
 
-.PHONY: docker-build-epp-nokube
-docker-build-epp-nokube: image-build-epp-nokube ## Build the epp-nokube (non-K8s) EPP container image
-
 .PHONY:	image-build
-image-build: image-build-epp image-build-epp-nokube image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
+image-build: image-build-epp image-build-sidecar ## Build Container image using $(CONTAINER_RUNTIME)
 
 .PHONY: image-build-%
 image-build-%: check-container-tool ## Build Container image using $(CONTAINER_RUNTIME)
@@ -358,19 +346,6 @@ image-build-%: check-container-tool ## Build Container image using $(CONTAINER_R
 		--build-arg LDFLAGS="$(LDFLAGS)" \
 		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE="$(BASE_IMAGE)") \
 		-t $($*_IMAGE) -f Dockerfile.$* .
-
-.PHONY: image-build-epp-nokube
-image-build-epp-nokube: check-container-tool ## Build epp-nokube container image using $(CONTAINER_RUNTIME)
-	@printf "\033[33;1m==== Building Docker image $(epp_nokube_IMAGE) ====\033[0m\n"
-	$(CONTAINER_RUNTIME) build \
-		--platform linux/$(TARGETARCH) \
-		--build-arg TARGETOS=linux \
-		--build-arg TARGETARCH=$(TARGETARCH) \
-		--build-arg COMMIT_SHA=${GIT_COMMIT_SHA} \
-		--build-arg BUILD_REF=${BUILD_REF} \
-		--build-arg LDFLAGS="$(LDFLAGS)" \
-		$(if $(BASE_IMAGE),--build-arg BASE_IMAGE="$(BASE_IMAGE)") \
-		-t $(epp_nokube_IMAGE) -f Dockerfile.epp-nokube .
 
 BUILDER_STAMP = build/.builder.stamp
 

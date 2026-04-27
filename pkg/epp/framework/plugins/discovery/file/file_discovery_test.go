@@ -38,7 +38,6 @@ type fakeNotifier struct {
 	mu      sync.Mutex
 	upserts []*fwkdl.EndpointMetadata
 	deletes []types.NamespacedName
-	synced  bool
 }
 
 func (n *fakeNotifier) Upsert(meta *fwkdl.EndpointMetadata) {
@@ -53,11 +52,6 @@ func (n *fakeNotifier) Delete(id types.NamespacedName) {
 	n.deletes = append(n.deletes, id)
 }
 
-func (n *fakeNotifier) MarkSynced() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.synced = true
-}
 
 func (n *fakeNotifier) upsertCount() int {
 	n.mu.Lock()
@@ -269,7 +263,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestStart_NoWatch verifies that Start calls load and MarkSynced then blocks until cancel.
+// TestStart_NoWatch verifies that Start loads backends and blocks until cancel.
 func TestStart_NoWatch(t *testing.T) {
 	path := writeTempFile(t, sampleYAML)
 	fd := &FileDiscovery{
@@ -284,12 +278,10 @@ func TestStart_NoWatch(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- fd.Start(ctx, notifier) }()
 
-	// Wait until MarkSynced is called.
+	// Wait until initial load completes.
 	require.Eventually(t, func() bool {
-		notifier.mu.Lock()
-		defer notifier.mu.Unlock()
-		return notifier.synced
-	}, time.Second, 10*time.Millisecond, "MarkSynced not called")
+		return notifier.upsertCount() == 2
+	}, time.Second, 10*time.Millisecond, "initial backends not loaded")
 
 	assert.Equal(t, 2, notifier.upsertCount())
 
@@ -318,12 +310,10 @@ func TestStart_WatchFile(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- fd.Start(ctx, notifier) }()
 
-	// Wait for initial sync (2 backends).
+	// Wait for initial load (2 backends).
 	require.Eventually(t, func() bool {
-		notifier.mu.Lock()
-		defer notifier.mu.Unlock()
-		return notifier.synced
-	}, 2*time.Second, 10*time.Millisecond, "initial MarkSynced not called")
+		return notifier.upsertCount() == 2
+	}, 2*time.Second, 10*time.Millisecond, "initial backends not loaded")
 
 	assert.Equal(t, 2, notifier.upsertCount())
 

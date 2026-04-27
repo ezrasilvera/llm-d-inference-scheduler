@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
@@ -154,7 +154,6 @@ func (d *DNSDiscovery) Start(ctx context.Context, notifier discovery.Notifier) e
 	}
 
 	poll()
-	notifier.MarkSynced()
 
 	ticker := time.NewTicker(d.p.RefreshInterval)
 	defer ticker.Stop()

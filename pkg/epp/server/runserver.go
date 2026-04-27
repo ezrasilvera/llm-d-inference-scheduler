@@ -123,8 +123,9 @@ func (r *ExtProcServerRunner) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	if err := (&controller.PodReconciler{
-		Datastore: r.Datastore,
-		Reader:    mgr.GetClient(),
+		Pool:     r.Datastore,
+		Notifier: &datastore.DatastoreNotifier{DS: r.Datastore},
+		Reader:   mgr.GetClient(),
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("failed setting up PodReconciler - %w", err)
 	}

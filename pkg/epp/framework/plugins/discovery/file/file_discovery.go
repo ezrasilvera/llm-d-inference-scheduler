@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/yaml"
 
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/discovery"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
 )
@@ -97,7 +97,6 @@ func (f *FileDiscovery) Start(ctx context.Context, notifier discovery.Notifier) 
 	if err := f.load(ctx, notifier); err != nil {
 		return fmt.Errorf("file-backend-discovery: initial load failed: %w", err)
 	}
-	notifier.MarkSynced()
 
 	if !f.watchFile {
 		<-ctx.Done()

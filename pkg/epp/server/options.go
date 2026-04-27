@@ -17,7 +17,6 @@ limitations under the License.
 package server
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -202,18 +201,13 @@ func (opts *Options) Complete() error {
 	return opts.LoggingOptions.Complete()
 }
 
+// Validate checks the mode-agnostic flag constraints. Pool identity and endpoint
+// selector requirements are validated by the discovery plugins themselves.
 func (opts *Options) Validate() error {
-	if (opts.PoolName != "" && opts.EndpointSelector != "") || (opts.PoolName == "" && opts.EndpointSelector == "") {
-		return errors.New("either pool-name or endpoint-selector must be set")
-	}
-	if opts.EndpointSelector != "" {
-		if len(opts.EndpointTargetPorts) == 0 || len(opts.EndpointTargetPorts) > 8 {
-			return fmt.Errorf("flag %q should have length from 1 to 8", "endpoint-target-ports")
-		}
-		for _, port := range opts.EndpointTargetPorts { // valid port range
-			if port < 0 || port > 65535 {
-				return fmt.Errorf("invalid port number %d in %q", port, "endpoint-target-ports")
-			}
+	// Port range validity applies to any mode that uses --endpoint-target-ports.
+	for _, port := range opts.EndpointTargetPorts {
+		if port < 0 || port > 65535 {
+			return fmt.Errorf("invalid port number %d in %q", port, "endpoint-target-ports")
 		}
 	}
 
@@ -225,7 +219,7 @@ func (opts *Options) Validate() error {
 			opts.ModelServerMetricsScheme, "model-server-metrics-scheme")
 	}
 
-	// Validate deprecated metric flags are not explicitly set
+	// Validate deprecated metric flags are not explicitly set.
 	deprecatedMetricFlags := []string{
 		"total-queued-requests-metric",
 		"total-running-requests-metric",
@@ -239,29 +233,7 @@ func (opts *Options) Validate() error {
 		}
 	}
 
-	// Validate logging options.
-	if err := opts.LoggingOptions.Validate(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ValidateNokube validates flags for nokube mode. It applies the same checks as
-// Validate() except the pool-name/endpoint-selector requirement, which is not
-// needed in nokube mode (pool identity defaults from --pool-name or POD_NAME env).
-func (opts *Options) ValidateNokube() error {
-	if opts.ConfigText != "" && opts.ConfigFile != "" {
-		return fmt.Errorf("both the %q and %q flags can not be set at the same time", "configText", "configFile")
-	}
-	if opts.ModelServerMetricsScheme != "http" && opts.ModelServerMetricsScheme != "https" {
-		return fmt.Errorf("unexpected %q value for %q flag, it can only be set to 'http' or 'https'",
-			opts.ModelServerMetricsScheme, "model-server-metrics-scheme")
-	}
-	if err := opts.LoggingOptions.Validate(); err != nil {
-		return err
-	}
-	return nil
+	return opts.LoggingOptions.Validate()
 }
 
 func removeDuplicatePorts(ports []int) []int {
