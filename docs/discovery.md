@@ -2,7 +2,7 @@
 
 ## Overview
 
-The EPP discovers inference endpoints through a **DiscoveryPlugin** — a pluggable abstraction that populates and maintains the endpoint datastore independently of the underlying infrastructure. By default the EPP uses Kubernetes CRD reconcilers to discover endpoints. When a `DiscoveryPlugin` is configured, all Kubernetes reconcilers are bypassed and the plugin becomes the sole source of truth for endpoint lifecycle.
+The EPP discovers inference endpoints through a **DiscoveryPlugin** -- a pluggable abstraction that populates and maintains the endpoint datastore independently of the underlying infrastructure. By default the EPP uses Kubernetes CRD reconcilers to discover endpoints. When a `DiscoveryPlugin` is configured, all Kubernetes reconcilers are bypassed and the plugin becomes the sole source of truth for endpoint lifecycle.
 
 This enables the EPP to run without a Kubernetes cluster, which is valuable for RL training and inference workloads on non-Kubernetes infrastructure such as **Slurm** and **Ray** clusters.
 
@@ -34,7 +34,7 @@ type Notifier interface {
 
 The `Notifier` is the callback interface through which the plugin drives the datastore.
 
-**Ordering contract:** the datastore processes `Upsert` and `Delete` calls in the order they are received. Plugin implementations **must** preserve event order — do not buffer, coalesce, or dispatch calls concurrently in a way that could reorder them. For example, an `Upsert` followed by a `Delete` for the same endpoint must arrive in that order, or the endpoint will be incorrectly left in the datastore.
+**Ordering contract:** the datastore processes `Upsert` and `Delete` calls in the order they are received. Plugin implementations **must** preserve event order -- do not buffer, coalesce, or dispatch calls concurrently in a way that could reorder them. For example, an `Upsert` followed by a `Delete` for the same endpoint must arrive in that order, or the endpoint will be incorrectly left in the datastore.
 
 ---
 
@@ -87,7 +87,7 @@ Reads a YAML (or JSON) file listing inference endpoints. Optionally watches the 
 
 | Parameter   | Type   | Required | Default | Description |
 |-------------|--------|----------|---------|-------------|
-| `path`      | string | yes      | —       | Path to the endpoints file |
+| `path`      | string | yes      | --      | Path to the endpoints file |
 | `watchFile` | bool   | no       | `false` | If true, reload the file when it changes on disk |
 
 #### Endpoints file format
@@ -166,7 +166,7 @@ epp \
   --metrics-port 9090
 ```
 
-The endpoints file can be written by an external process — for example, a Slurm epilog script that writes the allocated node addresses, or a Ray cluster initialisation hook.
+The endpoints file can be written by an external process -- for example, a Slurm epilog script that writes the allocated node addresses, or a Ray cluster initialisation hook.
 
 ---
 
