@@ -20,16 +20,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
 	"sync/atomic"
 	"time"
 
+	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -44,6 +50,9 @@ import (
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
+	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
+	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/file"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/profiling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/tracing"
@@ -134,6 +143,7 @@ type Runner struct {
 	customCollectors     []prometheus.Collector
 	parser               fwkrh.Parser
 	dlRuntime            *datalayer.Runtime
+	handle               fwkplugin.Handle
 }
 
 // WithExecutableName sets the name of the executable containing the runner.
@@ -192,6 +202,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse config early to determine whether we need a Kubernetes cluster.
+	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse configuration")
+		return err
+	}
+
+	if isNoKubeMode(rawConfig) {
+		setupLog.Info("file-discovery plugin detected — starting in no-kube mode (Kubernetes reconcilers disabled)")
+		return r.runNoKube(ctx, opts, rawConfig)
+	}
+
 	// --- Get Kubernetes Config ---
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -214,7 +236,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil)
+	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
 	if err != nil {
 		return err
 	}
@@ -236,12 +258,8 @@ func (r *Runner) Run(ctx context.Context) error {
 //
 // The returned Datastore is **only** meant to be used in the integration test.
 // Optional managerOverrides are applied to the controller manager options before creation.
-func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options)) (ctrl.Manager, datastore.Datastore, error) {
-	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
-	if err != nil {
-		setupLog.Error(err, "Failed to parse configuration")
-		return nil, nil, err
-	}
+// rawConfig must already be parsed by parseConfigurationPhaseOne before calling setup.
+func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options), rawConfig *configapi.EndpointPickerConfig) (ctrl.Manager, datastore.Datastore, error) {
 	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
 	epf := r.setupMetricsCollection(useNewMetrics, opts, pmc)
 	gknn, err := extractGKNN(opts.PoolName, opts.PoolGroup, opts.PoolNamespace, opts.EndpointSelector)
@@ -506,6 +524,8 @@ func (r *Runner) registerInTreePlugins() {
 	// register saturation detector plugins
 	fwkplugin.Register(concurrency.ConcurrencyDetectorType, concurrency.ConcurrencyDetectorFactory)
 	fwkplugin.Register(utilization.UtilizationDetectorType, utilization.UtilizationDetectorFactory)
+	// register discovery plugins
+	fwkplugin.Register(discoveryfile.PluginType, discoveryfile.Factory)
 }
 
 func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver.Options) (*configapi.EndpointPickerConfig, error) {
@@ -569,6 +589,7 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	applyDeprecatedEnvFeatureGate(enableExperimentalFlowControlLayer, "Flow Control layer", flowcontrol.FeatureGate, rawConfig)
 
 	handle := fwkplugin.NewEppHandle(ctx, makePodListFunc(ds))
+	r.handle = handle
 	cfg, err := loader.InstantiateAndConfigure(rawConfig, handle, logger)
 
 	if err != nil {
@@ -728,4 +749,155 @@ func resolvePoolNamespace(poolNamespace string) string {
 		return nsEnv
 	}
 	return runserver.DefaultPoolNamespace
+}
+
+// isNoKubeMode returns true when the config references a file-discovery plugin,
+// indicating that no Kubernetes cluster is required.
+func isNoKubeMode(rawConfig *configapi.EndpointPickerConfig) bool {
+	if rawConfig.Discovery == nil {
+		return false
+	}
+	for _, p := range rawConfig.Plugins {
+		if p.Name == rawConfig.Discovery.PluginRef && p.Type == discoveryfile.PluginType {
+			return true
+		}
+	}
+	return false
+}
+
+// runNoKube is the lightweight execution path used when a file-discovery plugin is
+// configured. It skips the Kubernetes controller manager and CRD reconcilers entirely,
+// running the EPP as a standalone process connected to no cluster.
+func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
+	namespace := resolvePoolNamespace(opts.PoolNamespace)
+	poolName := opts.PoolName
+	if poolName == "" {
+		if env := os.Getenv("POD_NAME"); env != "" {
+			poolName = env
+		} else {
+			poolName = "epp"
+		}
+	}
+
+	epf := r.setupMetricsCollection(true, opts, nil)
+	pool := datalayer.NewEndpointPool(namespace, poolName)
+	ds := datastore.NewDatastore(ctx, epf, int32(opts.ModelServerMetricsPort)).WithEndpointPool(pool)
+
+	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds)
+	if err != nil {
+		setupLog.Error(err, "Failed to parse configuration")
+		return err
+	}
+
+	if r.schedulerConfig == nil {
+		return errors.New("scheduler config must be set either by config api or through code")
+	}
+
+	// Resolve discovery plugin.
+	rawDisc := r.handle.Plugin(rawConfig.Discovery.PluginRef)
+	if rawDisc == nil {
+		return fmt.Errorf("discovery pluginRef %q not found", rawConfig.Discovery.PluginRef)
+	}
+	disc, ok := rawDisc.(discovery.DiscoveryPlugin)
+	if !ok {
+		return fmt.Errorf("plugin %q does not implement DiscoveryPlugin", rawConfig.Discovery.PluginRef)
+	}
+
+	// Configure datalayer for HTTP metrics polling (no K8s notification binding).
+	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
+	disallowedExtractorType := ""
+	if !useNewMetrics {
+		disallowedExtractorType = extractormetrics.MetricsExtractorType
+	}
+	if err := r.dlRuntime.Configure(eppConfig.DataConfig, useNewMetrics, disallowedExtractorType, setupLog); err != nil {
+		return fmt.Errorf("failed to configure datalayer: %w", err)
+	}
+
+	scheduler := scheduling.NewSchedulerWithConfig(r.schedulerConfig)
+	endpointCandidates := requestcontrol.NewDatastoreEndpointCandidates(ds, requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter))
+	admissionController := requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
+	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
+
+	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
+	metrics.Register(r.customCollectors...)
+	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
+
+	extProcSrv := grpc.NewServer()
+	extProcPb.RegisterExternalProcessorServer(extProcSrv, handlers.NewStreamingServer(ds, director, r.parser))
+
+	healthSrv := grpc.NewServer()
+	healthcheck := health.NewServer()
+	healthgrpc.RegisterHealthServer(healthSrv, healthcheck)
+	svcName := extProcPb.ExternalProcessor_ServiceDesc.ServiceName
+	healthcheck.SetServingStatus(svcName, healthgrpc.HealthCheckResponse_SERVING)
+
+	setupLog.Info("EPP starting (no-kube mode)",
+		"grpcPort", opts.GRPCPort,
+		"healthPort", opts.GRPCHealthPort,
+		"metricsPort", opts.MetricsPort,
+		"pool", poolName,
+		"namespace", namespace,
+		"discoveryPlugin", rawConfig.Discovery.PluginRef)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return disc.Start(gctx, &datastoreNotifier{ds: ds}) })
+	g.Go(func() error { return r.dlRuntime.StartPollers(gctx) })
+	g.Go(func() error { return serveGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
+	g.Go(func() error { return serveGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
+	g.Go(func() error { return serveMetrics(gctx, opts.MetricsPort) })
+	return g.Wait()
+}
+
+// datastoreNotifier adapts datastore.Datastore to discovery.Notifier.
+type datastoreNotifier struct {
+	ds datastore.Datastore
+}
+
+func (n *datastoreNotifier) Upsert(endpoints []*fwkdl.EndpointMetadata) {
+	for _, meta := range endpoints {
+		n.ds.BackendUpsert(context.Background(), meta)
+	}
+}
+
+func (n *datastoreNotifier) Delete(id types.NamespacedName) {
+	n.ds.BackendDelete(id)
+}
+
+// serveGRPC starts a gRPC server and blocks until ctx is cancelled.
+func serveGRPC(ctx context.Context, srv *grpc.Server, port int, name string) error {
+	logger := ctrl.Log.WithValues("name", name, "port", port)
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return fmt.Errorf("%s gRPC server failed to listen: %w", name, err)
+	}
+	logger.Info("gRPC server listening")
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			logger.Info("gRPC server shutting down")
+			srv.GracefulStop()
+		case <-done:
+		}
+	}()
+	if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+		return fmt.Errorf("%s gRPC server error: %w", name, err)
+	}
+	return nil
+}
+
+// serveMetrics starts a plain HTTP Prometheus metrics server.
+func serveMetrics(ctx context.Context, port int) error {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
+	go func() {
+		<-ctx.Done()
+		_ = srv.Shutdown(context.Background())
+	}()
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("metrics server error: %w", err)
+	}
+	return nil
 }

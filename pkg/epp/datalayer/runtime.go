@@ -149,6 +149,15 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	return err
 }
 
+// StartPollers starts data collection without a ctrl.Manager. Use this in non-K8s
+// mode where no NotificationSources are configured. Polling collectors start
+// automatically as endpoints are added via BackendUpsert; this call simply blocks
+// until ctx is cancelled so that the errgroup goroutine stays alive.
+func (r *Runtime) StartPollers(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
 // Stop is called to terminate the Runtime's data collection. It terminates all
 // go routines used for polling data sources.
 func (r *Runtime) Stop() error {

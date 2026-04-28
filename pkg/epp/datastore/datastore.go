@@ -81,6 +81,11 @@ type Datastore interface {
 	PodUpdateOrAddIfNotExist(ctx context.Context, pod *corev1.Pod) bool
 	PodDelete(podName string)
 
+	// BackendUpsert adds or updates an endpoint from a non-Kubernetes discovery source.
+	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
+	// BackendDelete removes the endpoint with the given namespaced name.
+	BackendDelete(id types.NamespacedName)
+
 	// Clears the store state, happens when the pool gets deleted.
 	Clear()
 }
@@ -372,6 +377,28 @@ func (ds *datastore) PodDelete(podName string) {
 		}
 		return true
 	})
+}
+
+// BackendUpsert adds or updates an endpoint using EndpointMetadata directly,
+// bypassing Kubernetes pod machinery. Used by non-K8s discovery plugins.
+func (ds *datastore) BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata) {
+	existing, ok := ds.pods.Load(meta.NamespacedName)
+	if !ok {
+		ep := ds.epf.NewEndpoint(ds.parentCtx, meta, ds)
+		if ep == nil {
+			return
+		}
+		ds.pods.Store(meta.NamespacedName, ep)
+		return
+	}
+	existing.(fwkdl.Endpoint).UpdateMetadata(meta)
+}
+
+// BackendDelete removes the endpoint with the given namespaced name.
+func (ds *datastore) BackendDelete(id types.NamespacedName) {
+	if v, ok := ds.pods.LoadAndDelete(id); ok {
+		ds.epf.ReleaseEndpoint(v.(fwkdl.Endpoint))
+	}
 }
 
 func (ds *datastore) podResyncAll(ctx context.Context, reader client.Reader) error {
