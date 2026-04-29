@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -204,8 +203,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	if isNoKubeMode(rawConfig) {
-		setupLog.Info("file-discovery plugin detected — starting in no-kube mode (Kubernetes reconcilers disabled)")
-		return r.runNoKube(ctx, opts, rawConfig)
+		setupLog.Info("file-discovery plugin detected -- starting in no-kube mode (Kubernetes reconcilers disabled)")
+		return r.runNoKube(ctx, opts, rawConfig, rungroup.NewErrGroupRunner())
 	}
 
 	// --- Get Kubernetes Config ---
@@ -235,11 +234,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	g := rungroup.NewManagerRunner(mgr)
-	r.addCommonRunnables(g, opts, ds, serverRunner)
-
 	setupLog.Info("Controller manager starting")
-	return g.Run(ctx)
+	return r.runK8s(ctx, opts, ds, serverRunner, rungroup.NewManagerRunner(mgr))
 }
 
 // setup configures the internal state of the Runner, including the manager,
@@ -275,10 +271,9 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		return nil, nil, nil, err
 	}
 
+	r.registerMetrics(ds)
+
 	// --- Setup Metrics Server ---
-	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
-	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 	// Register metrics handler.
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
 	// More info:
@@ -376,22 +371,10 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 
 	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
 
-	serverRunner := &runserver.ExtProcServerRunner{
-		GrpcPort:                         opts.GRPCPort,
-		GKNN:                             *gknn,
-		Datastore:                        ds,
-		ControllerCfg:                    controllerCfg,
-		SecureServing:                    opts.SecureServing,
-		HealthChecking:                   opts.HealthChecking,
-		CertPath:                         opts.CertPath,
-		EnableCertReload:                 opts.EnableCertReload,
-		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
-		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
-		Director:                         director,
-		Parser:                           r.parser,
-		SaturationDetector:               eppConfig.SaturationDetector,
-		UseExperimentalDatalayerV2:       r.featureGates[datalayer.ExperimentalDatalayerFeatureGate] || !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate],
-	}
+	useExperimental := r.featureGates[datalayer.ExperimentalDatalayerFeatureGate] || !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
+	serverRunner := r.buildServerRunner(opts, ds, director, eppConfig, useExperimental)
+	serverRunner.GKNN = *gknn
+	serverRunner.ControllerCfg = controllerCfg
 
 	if err := serverRunner.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to setup EPP controllers")
@@ -642,6 +625,34 @@ func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.O
 	return backendmetrics.NewPodMetricsFactory(pmc, opts.RefreshMetricsInterval)
 }
 
+// registerMetrics registers Prometheus collectors and records build info.
+// Called by both the K8s and no-kube paths before starting servers.
+func (r *Runner) registerMetrics(ds datastore.Datastore) {
+	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
+	metrics.Register(r.customCollectors...)
+	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
+}
+
+// buildServerRunner constructs an ExtProcServerRunner with the fields common to
+// both the K8s and no-kube paths. Callers may set K8s-specific fields (GKNN,
+// ControllerCfg) on the returned value before use.
+func (r *Runner) buildServerRunner(opts *runserver.Options, ds datastore.Datastore, director *requestcontrol.Director, eppConfig *config.Config, useExperimentalDatalayer bool) *runserver.ExtProcServerRunner {
+	return &runserver.ExtProcServerRunner{
+		GrpcPort:                         opts.GRPCPort,
+		Datastore:                        ds,
+		SecureServing:                    opts.SecureServing,
+		HealthChecking:                   opts.HealthChecking,
+		CertPath:                         opts.CertPath,
+		EnableCertReload:                 opts.EnableCertReload,
+		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
+		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
+		Director:                         director,
+		Parser:                           r.parser,
+		SaturationDetector:               eppConfig.SaturationDetector,
+		UseExperimentalDatalayerV2:       useExperimentalDatalayer,
+	}
+}
+
 // addCommonRunnables adds the ext-proc, health, and metrics servers to g.
 // These runnables are shared between the K8s and no-kube execution paths.
 func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner) {
@@ -744,10 +755,17 @@ func isNoKubeMode(rawConfig *configapi.EndpointPickerConfig) bool {
 	return false
 }
 
+// runK8s is the execution path for Kubernetes mode. The manager already has
+// reconcilers registered; this function adds the shared servers and starts the group.
+func (r *Runner) runK8s(ctx context.Context, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner, g rungroup.RunnableGroup) error {
+	r.addCommonRunnables(g, opts, ds, serverRunner)
+	return g.Run(ctx)
+}
+
 // runNoKube is the lightweight execution path used when a file-discovery plugin is
 // configured. It skips the Kubernetes controller manager and CRD reconcilers entirely,
 // running the EPP as a standalone process connected to no cluster.
-func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig) error {
+func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig, g rungroup.RunnableGroup) error {
 	namespace := resolvePoolNamespace(opts.PoolNamespace)
 	poolName := opts.PoolName
 	if poolName == "" {
@@ -797,9 +815,7 @@ func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConf
 	admissionController := requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
 	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
 
-	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
-	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
+	r.registerMetrics(ds)
 
 	setupLog.Info("EPP starting (no-kube mode)",
 		"grpcPort", opts.GRPCPort,
@@ -809,50 +825,12 @@ func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConf
 		"namespace", namespace,
 		"discoveryPlugin", rawConfig.Discovery.PluginRef)
 
-	serverRunner := &runserver.ExtProcServerRunner{
-		GrpcPort:                         opts.GRPCPort,
-		Datastore:                        ds,
-		SecureServing:                    opts.SecureServing,
-		HealthChecking:                   opts.HealthChecking,
-		CertPath:                         opts.CertPath,
-		EnableCertReload:                 opts.EnableCertReload,
-		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
-		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
-		Director:                         director,
-		Parser:                           r.parser,
-		SaturationDetector:               eppConfig.SaturationDetector,
-		UseExperimentalDatalayerV2:       true,
-	}
+	serverRunner := r.buildServerRunner(opts, ds, director, eppConfig, true)
 
-	g := rungroup.NewErrGroupRunner()
 	g.Add("discovery", func(ctx context.Context) error { return disc.Start(ctx, discovery.NewNotifier(ds)) })
 	g.Add("pollers", r.dlRuntime.StartPollers)
 	r.addCommonRunnables(g, opts, ds, serverRunner)
 	return g.Run(ctx)
-}
-
-// serveGRPC starts a gRPC server and blocks until ctx is cancelled.
-func serveGRPC(ctx context.Context, srv *grpc.Server, port int, name string) error {
-	logger := ctrl.Log.WithValues("name", name, "port", port)
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return fmt.Errorf("%s gRPC server failed to listen: %w", name, err)
-	}
-	logger.Info("gRPC server listening")
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-ctx.Done():
-			logger.Info("gRPC server shutting down")
-			srv.GracefulStop()
-		case <-done:
-		}
-	}()
-	if err := srv.Serve(lis); err != nil && err != grpc.ErrServerStopped {
-		return fmt.Errorf("%s gRPC server error: %w", name, err)
-	}
-	return nil
 }
 
 // serveMetrics starts a plain HTTP Prometheus metrics server.
