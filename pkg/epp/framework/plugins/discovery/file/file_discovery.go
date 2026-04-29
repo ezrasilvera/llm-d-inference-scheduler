@@ -139,8 +139,8 @@ func (f *FileDiscovery) Start(ctx context.Context, notifier discovery.Notifier) 
 	}
 }
 
-// load reads the file, calls notifier.Upsert for all endpoints in one batch, and
-// calls notifier.Delete for any endpoint that was present in the previous load but is absent now.
+// load reads the file, calls notifier.Upsert for each endpoint in order, then
+// calls notifier.Delete for any endpoint present in the previous load but absent now.
 func (f *FileDiscovery) load(_ context.Context, notifier discovery.Notifier) error {
 	data, err := os.ReadFile(f.path)
 	if err != nil {
@@ -158,7 +158,6 @@ func (f *FileDiscovery) load(_ context.Context, notifier discovery.Notifier) err
 	}
 
 	incoming := make(map[types.NamespacedName]struct{}, len(ef.Endpoints))
-	batch := make([]*fwkdl.EndpointMetadata, 0, len(ef.Endpoints))
 
 	for _, e := range ef.Endpoints {
 		ns := e.Namespace
@@ -177,12 +176,7 @@ func (f *FileDiscovery) load(_ context.Context, notifier discovery.Notifier) err
 			meta.MetricsHost = fmt.Sprintf("%s:%s", e.Address, e.Port)
 		}
 		incoming[meta.NamespacedName] = struct{}{}
-		batch = append(batch, meta)
-	}
-
-	// Upsert all current endpoints in a single ordered call.
-	if len(batch) > 0 {
-		notifier.Upsert(batch)
+		notifier.Upsert(meta)
 	}
 
 	// Delete endpoints absent from the new file version.

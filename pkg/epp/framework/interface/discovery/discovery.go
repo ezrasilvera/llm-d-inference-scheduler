@@ -41,13 +41,40 @@ type DiscoveryPlugin interface {
 // to the datastore.
 //
 // Ordering contract: the datastore processes Upsert and Delete calls in the order
-// they are received. Plugin implementations MUST preserve event order — do not
-// buffer, coalesce, or dispatch calls concurrently in a way that could reorder
-// them. For example, an Upsert followed by a Delete for the same endpoint must
-// arrive in that order, or the endpoint will be incorrectly left in the datastore.
+// they are received. Plugin implementations MUST preserve event order -- do not
+// buffer or dispatch calls concurrently in a way that could reorder them. For
+// example, an Upsert followed by a Delete for the same endpoint must arrive in
+// that order, or the endpoint will be incorrectly left in the datastore.
 type Notifier interface {
-	// Upsert adds or updates one or more endpoints in the datastore.
-	Upsert(endpoints []*fwkdl.EndpointMetadata)
+	// Upsert adds or updates an endpoint in the datastore.
+	Upsert(endpoint *fwkdl.EndpointMetadata)
 	// Delete removes an endpoint from the datastore by its namespaced name.
 	Delete(id types.NamespacedName)
+}
+
+// BackendStore is the narrow interface required by NewNotifier. Any store that
+// implements BackendUpsert and BackendDelete satisfies it -- no import of the
+// datastore package is needed here.
+type BackendStore interface {
+	BackendUpsert(ctx context.Context, meta *fwkdl.EndpointMetadata)
+	BackendDelete(id types.NamespacedName)
+}
+
+// NewNotifier wraps a BackendStore as a Notifier. Use this in the runner to
+// bridge disc.Start into the datastore without importing the datastore package
+// from within discovery plugins.
+func NewNotifier(store BackendStore) Notifier {
+	return &datastoreNotifier{store: store}
+}
+
+type datastoreNotifier struct {
+	store BackendStore
+}
+
+func (n *datastoreNotifier) Upsert(endpoint *fwkdl.EndpointMetadata) {
+	n.store.BackendUpsert(context.Background(), endpoint)
+}
+
+func (n *datastoreNotifier) Delete(id types.NamespacedName) {
+	n.store.BackendDelete(id)
 }

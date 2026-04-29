@@ -50,7 +50,6 @@ import (
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
 	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/file"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
@@ -840,27 +839,12 @@ func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConf
 		"discoveryPlugin", rawConfig.Discovery.PluginRef)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return disc.Start(gctx, &datastoreNotifier{ds: ds}) })
+	g.Go(func() error { return disc.Start(gctx, discovery.NewNotifier(ds)) })
 	g.Go(func() error { return r.dlRuntime.StartPollers(gctx) })
 	g.Go(func() error { return serveGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
 	g.Go(func() error { return serveGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
 	g.Go(func() error { return serveMetrics(gctx, opts.MetricsPort) })
 	return g.Wait()
-}
-
-// datastoreNotifier adapts datastore.Datastore to discovery.Notifier.
-type datastoreNotifier struct {
-	ds datastore.Datastore
-}
-
-func (n *datastoreNotifier) Upsert(endpoints []*fwkdl.EndpointMetadata) {
-	for _, meta := range endpoints {
-		n.ds.BackendUpsert(context.Background(), meta)
-	}
-}
-
-func (n *datastoreNotifier) Delete(id types.NamespacedName) {
-	n.ds.BackendDelete(id)
 }
 
 // serveGRPC starts a gRPC server and blocks until ctx is cancelled.
