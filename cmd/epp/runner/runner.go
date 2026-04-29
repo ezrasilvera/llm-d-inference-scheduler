@@ -27,15 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	extProcPb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,11 +38,11 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
+	"github.com/llm-d/llm-d-inference-scheduler/internal/rungroup"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
@@ -235,55 +230,49 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	mgr, _, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
+	mgr, ds, serverRunner, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
 	if err != nil {
 		return err
 	}
 
-	// --- Start Manager ---
-	// This blocks until a signal is received.
+	g := rungroup.NewManagerRunner(mgr)
+	r.addCommonRunnables(g, opts, ds, serverRunner)
+
 	setupLog.Info("Controller manager starting")
-	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "Error starting controller manager")
-		return err
-	}
-	setupLog.Info("Controller manager terminated")
-	return nil
+	return g.Run(ctx)
 }
 
 // setup configures the internal state of the Runner, including the manager,
 // datastore, and other server components. It returns the initialized Manager
-// without starting it, allowing for flexible use in integration tests.
-//
-// The returned Datastore is **only** meant to be used in the integration test.
-// Optional managerOverrides are applied to the controller manager options before creation.
+// and ExtProcServerRunner without starting them, allowing for flexible use in
+// integration tests and the unified runWithGroup path.
 // rawConfig must already be parsed by parseConfigurationPhaseOne before calling setup.
-func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options), rawConfig *configapi.EndpointPickerConfig) (ctrl.Manager, datastore.Datastore, error) {
+func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options), rawConfig *configapi.EndpointPickerConfig) (ctrl.Manager, datastore.Datastore, *runserver.ExtProcServerRunner, error) {
 	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
 	epf := r.setupMetricsCollection(useNewMetrics, opts, pmc)
 	gknn, err := extractGKNN(opts.PoolName, opts.PoolGroup, opts.PoolNamespace, opts.EndpointSelector)
 	if err != nil {
 		setupLog.Error(err, "Failed to extract GKNN")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	startCrdReconcilers := opts.EndpointSelector == "" // If endpointSelector is empty, it means it's not in the standalone mode. Then we should start the inferencePool and other CRD Reconciler.
 	controllerCfg := runserver.NewControllerConfig(startCrdReconcilers)
 	if err := controllerCfg.PopulateControllerConfig(cfg); err != nil {
 		setupLog.Error(err, "Failed to populate controller config")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	ds, err := setupDatastore(ctx, epf, int32(opts.ModelServerMetricsPort), startCrdReconcilers,
 		gknn.Namespace, gknn.Name, opts.EndpointSelector, opts.EndpointTargetPorts)
 	if err != nil {
 		setupLog.Error(err, "Failed to setup datastore")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// --- Setup Metrics Server ---
@@ -312,7 +301,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 	mgr, err := runserver.NewDefaultManager(controllerCfg, *gknn, cfg, metricsServerOptions, opts.EnableLeaderElection, managerOverrides...)
 	if err != nil {
 		setupLog.Error(err, "Failed to create controller manager")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if opts.EnableLeaderElection {
@@ -331,7 +320,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		setupLog.Info("Setting pprof handlers")
 		if err = profiling.SetupPprofHandlers(mgr); err != nil {
 			setupLog.Error(err, "Failed to setup pprof handlers")
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
@@ -339,7 +328,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 	if r.schedulerConfig == nil {
 		err := errors.New("scheduler config must be set either by config api or through code")
 		setupLog.Error(err, "failed to create scheduler")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	setupLog.Info("parsed config", "scheduler-config", r.schedulerConfig)
@@ -350,7 +339,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 	datalayerMetricsEnabled := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
 	if err := r.configureAndStartDatalayer(ctx, datalayerMetricsEnabled, eppConfig.DataConfig, mgr); err != nil {
 		setupLog.Error(err, "failed to initialize data layer")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// --- Admission Control Initialization ---
@@ -362,7 +351,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 		setupLog.Info("Initializing experimental Flow Control layer")
 		registry, err := fcregistry.NewFlowRegistry(eppConfig.FlowControlConfig.Registry, setupLog)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize Flow Registry: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize Flow Registry: %w", err)
 		}
 		fc, err := fccontroller.NewFlowController(
 			ctx,
@@ -376,7 +365,7 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 			},
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize Flow Controller: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize Flow Controller: %w", err)
 		}
 		go registry.Run(ctx)
 		admissionController = requestcontrol.NewFlowControlAdmissionController(fc, opts.PoolName)
@@ -406,20 +395,10 @@ func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Op
 
 	if err := serverRunner.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to setup EPP controllers")
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// --- Add Runnables to Manager ---
-	// Register health server.
-	if err := registerHealthServer(mgr, ctrl.Log.WithName("health"), ds, opts.GRPCHealthPort, isLeader, opts.EnableLeaderElection, r.parser); err != nil {
-		return nil, nil, err
-	}
-
-	// Register ext-proc server.
-	if err := registerExtProcServer(mgr, serverRunner, ctrl.Log.WithName("ext-proc")); err != nil {
-		return nil, nil, err
-	}
-	return mgr, ds, nil
+	return mgr, ds, serverRunner, nil
 }
 
 // NewEndpointPoolFromOptions constructs an EndpointPool from standalone options.
@@ -663,32 +642,33 @@ func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.O
 	return backendmetrics.NewPodMetricsFactory(pmc, opts.RefreshMetricsInterval)
 }
 
-// registerExtProcServer adds the ExtProcServerRunner as a Runnable to the manager.
-func registerExtProcServer(mgr manager.Manager, runner *runserver.ExtProcServerRunner, logger logr.Logger) error {
-	if err := mgr.Add(runner.AsRunnable(logger)); err != nil {
-		setupLog.Error(err, "Failed to register ext-proc gRPC server runnable")
-		return err
-	}
-	setupLog.Info("ExtProc server runner added to manager.")
-	return nil
+// addCommonRunnables adds the ext-proc, health, and metrics servers to g.
+// These runnables are shared between the K8s and no-kube execution paths.
+func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner) {
+	logger := ctrl.Log.WithName("ext-proc")
+	g.Add("ext-proc", func(ctx context.Context) error {
+		return serverRunner.AsRunnable(logger).Start(ctx)
+	})
+	g.Add("health", buildHealthServer(ds, opts.GRPCHealthPort, r.parser))
+	g.Add("metrics", func(ctx context.Context) error { return serveMetrics(ctx, opts.MetricsPort) })
 }
 
-// registerHealthServer adds the Health gRPC server as a Runnable to the given manager.
-func registerHealthServer(mgr manager.Manager, logger logr.Logger, ds datastore.Datastore, port int, isLeader *atomic.Bool, leaderElectionEnabled bool, supporter appProtocolSupporter) error {
-	srv := grpc.NewServer()
-	healthPb.RegisterHealthServer(srv, &healthServer{
-		logger:                logger,
-		datastore:             ds,
-		isLeader:              isLeader,
-		leaderElectionEnabled: leaderElectionEnabled,
-		supporter:             supporter,
-	})
-	if err := mgr.Add(
-		runnable.NoLeaderElection(runnable.GRPCServer("health", srv, port))); err != nil {
-		setupLog.Error(err, "Failed to register health server")
-		return err
+// buildHealthServer returns a runnable that serves the gRPC health endpoint.
+func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSupporter) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		logger := ctrl.Log.WithName("health")
+		isLeader := &atomic.Bool{}
+		isLeader.Store(true) // no leader election in standalone health server
+		srv := grpc.NewServer()
+		healthPb.RegisterHealthServer(srv, &healthServer{
+			logger:                logger,
+			datastore:             ds,
+			isLeader:              isLeader,
+			leaderElectionEnabled: false,
+			supporter:             supporter,
+		})
+		return runnable.GRPCServer("health", srv, port).Start(ctx)
 	}
-	return nil
 }
 
 func extractDeploymentName(podName string) (string, error) {
@@ -821,15 +801,6 @@ func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConf
 	metrics.Register(r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 
-	extProcSrv := grpc.NewServer()
-	extProcPb.RegisterExternalProcessorServer(extProcSrv, handlers.NewStreamingServer(ds, director, r.parser))
-
-	healthSrv := grpc.NewServer()
-	healthcheck := health.NewServer()
-	healthgrpc.RegisterHealthServer(healthSrv, healthcheck)
-	svcName := extProcPb.ExternalProcessor_ServiceDesc.ServiceName
-	healthcheck.SetServingStatus(svcName, healthgrpc.HealthCheckResponse_SERVING)
-
 	setupLog.Info("EPP starting (no-kube mode)",
 		"grpcPort", opts.GRPCPort,
 		"healthPort", opts.GRPCHealthPort,
@@ -838,13 +809,26 @@ func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConf
 		"namespace", namespace,
 		"discoveryPlugin", rawConfig.Discovery.PluginRef)
 
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return disc.Start(gctx, discovery.NewNotifier(ds)) })
-	g.Go(func() error { return r.dlRuntime.StartPollers(gctx) })
-	g.Go(func() error { return serveGRPC(gctx, extProcSrv, opts.GRPCPort, "ext-proc") })
-	g.Go(func() error { return serveGRPC(gctx, healthSrv, opts.GRPCHealthPort, "health") })
-	g.Go(func() error { return serveMetrics(gctx, opts.MetricsPort) })
-	return g.Wait()
+	serverRunner := &runserver.ExtProcServerRunner{
+		GrpcPort:                         opts.GRPCPort,
+		Datastore:                        ds,
+		SecureServing:                    opts.SecureServing,
+		HealthChecking:                   opts.HealthChecking,
+		CertPath:                         opts.CertPath,
+		EnableCertReload:                 opts.EnableCertReload,
+		RefreshPrometheusMetricsInterval: opts.RefreshPrometheusMetricsInterval,
+		MetricsStalenessThreshold:        opts.MetricsStalenessThreshold,
+		Director:                         director,
+		Parser:                           r.parser,
+		SaturationDetector:               eppConfig.SaturationDetector,
+		UseExperimentalDatalayerV2:       true,
+	}
+
+	g := rungroup.NewErrGroupRunner()
+	g.Add("discovery", func(ctx context.Context) error { return disc.Start(ctx, discovery.NewNotifier(ds)) })
+	g.Add("pollers", r.dlRuntime.StartPollers)
+	r.addCommonRunnables(g, opts, ds, serverRunner)
+	return g.Run(ctx)
 }
 
 // serveGRPC starts a gRPC server and blocks until ctx is cancelled.

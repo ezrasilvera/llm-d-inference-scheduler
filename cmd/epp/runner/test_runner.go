@@ -58,5 +58,6 @@ func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.O
 	if err != nil {
 		return nil, nil, err
 	}
-	return runner.setup(ctx, cfg, opts, pmc, managerOverrides, rawConfig)
+	mgr, ds, _, err := runner.setup(ctx, cfg, opts, pmc, managerOverrides, rawConfig)
+	return mgr, ds, err
 }
