@@ -20,21 +20,23 @@ import (
 	"context"
 	"encoding/json"
 
-	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datalayer"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/datastore"
 	fwkdl "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/plugin"
+	k8sdiscovery "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/k8s"
 	runserver "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/server"
 )
 
-// NewTestRunnerSetup creates a setup runner dedicated for integration tests. When mockDataSource is
-// non-nil, its plugin type is registered as a factory that returns the provided instance, so the
-// YAML config can reference it by type name and the runner wires it into the endpoint factory
-// automatically. Pass nil to fall back to the legacy metrics system with pmc.
-func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, mockDataSource fwkdl.DataSource) (ctrl.Manager, datastore.Datastore, error) {
+// NewTestRunnerSetup creates a datastore for integration tests using the K8s
+// InferencePool discovery plugin. The returned datastore is wired up with the
+// runner's plugin configuration but the manager is owned by the discovery
+// plugin -- call disc.Start(ctx, notifier) to begin reconciliation.
+//
+// When mockDataSource is non-nil, its plugin type is registered as a factory
+// so the YAML config can reference it by type name.
+func NewTestRunnerSetup(ctx context.Context, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, mockDataSource fwkdl.DataSource) (datastore.Datastore, *k8sdiscovery.InferencePoolDiscoveryPlugin, error) {
 	runner := NewRunner()
 
 	if mockDataSource != nil {
@@ -45,19 +47,28 @@ func NewTestRunnerSetup(ctx context.Context, cfg *rest.Config, opts *runserver.O
 		defer delete(fwkplugin.Registry, mockType)
 	}
 
-	// Skip controller name validation in integration tests to avoid collisions
-	// when multiple controllers are registered within the same test process.
-	skipNameValidation := true
-	managerOverrides := []func(*ctrl.Options){
-		func(o *ctrl.Options) {
-			o.Controller.SkipNameValidation = &skipNameValidation
-		},
-	}
-
 	rawConfig, err := runner.parseConfigurationPhaseOne(ctx, opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	mgr, ds, _, err := runner.setup(ctx, cfg, opts, pmc, managerOverrides, rawConfig)
-	return mgr, ds, err
+
+	useNewMetrics := !runner.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
+	epf := runner.setupMetricsCollection(useNewMetrics, opts, pmc)
+
+	namespace := resolvePoolNamespace(opts.PoolNamespace)
+	poolName := opts.PoolName
+	if poolName == "" {
+		poolName = "epp"
+	}
+	pool := datalayer.NewEndpointPool(namespace, poolName)
+	ds := datastore.NewDatastore(ctx, epf, int32(opts.ModelServerMetricsPort)).WithEndpointPool(pool)
+
+	if _, err := runner.parseConfigurationPhaseTwo(ctx, rawConfig, ds); err != nil {
+		return nil, nil, err
+	}
+
+	disc := k8sdiscovery.NewInferencePoolDiscoveryPlugin(opts.PoolName, namespace, opts.PoolGroup, opts.EnableLeaderElection)
+	disc.SetDatastore(ds)
+
+	return ds, disc, nil
 }

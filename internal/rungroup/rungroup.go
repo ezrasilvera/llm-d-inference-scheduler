@@ -39,6 +39,13 @@ type RunnableGroup interface {
 	Run(ctx context.Context) error
 }
 
+// New returns the default RunnableGroup implementation.
+// Callers should use this instead of NewErrGroupRunner so runner code
+// contains no reference to the underlying errgroup implementation.
+func New() RunnableGroup {
+	return NewErrGroupRunner()
+}
+
 // NewErrGroupRunner returns a RunnableGroup backed by errgroup.
 // Use this in no-kube mode where no ctrl.Manager is available.
 func NewErrGroupRunner() RunnableGroup {

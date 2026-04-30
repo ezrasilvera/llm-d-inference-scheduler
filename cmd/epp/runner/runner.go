@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
 	"sync/atomic"
 	"time"
 
@@ -31,23 +30,14 @@ import (
 	"github.com/spf13/pflag"
 	"google.golang.org/grpc"
 	healthPb "google.golang.org/grpc/health/grpc_health_v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	configapi "github.com/llm-d/llm-d-inference-scheduler/apix/config/v1alpha1"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/rungroup"
 	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
-	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/file"
 	logutil "github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/profiling"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/common/observability/tracing"
 	backendmetrics "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/backend/metrics"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/config"
@@ -104,6 +94,9 @@ import (
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/scheduling"
 	runserver "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/server"
 	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/util/env"
+	"github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/interface/discovery"
+	discoveryfile "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/file"
+	k8sdiscovery "github.com/llm-d/llm-d-inference-scheduler/pkg/epp/framework/plugins/discovery/k8s"
 	"github.com/llm-d/llm-d-inference-scheduler/version"
 )
 
@@ -122,14 +115,14 @@ var (
 func NewRunner() *Runner {
 	return &Runner{
 		eppExecutableName:    "GIE",
-		requestControlConfig: requestcontrol.NewConfig(), // default requestcontrol config has empty plugin list
+		requestControlConfig: requestcontrol.NewConfig(),
 		customCollectors:     []prometheus.Collector{},
 	}
 }
 
-// Runner is used to run epp with its plugins
+// Runner is used to run epp with its plugins.
 type Runner struct {
-	eppExecutableName    string // the EPP executable name
+	eppExecutableName    string
 	featureGates         map[string]bool
 	requestControlConfig *requestcontrol.Config
 	schedulerConfig      *scheduling.SchedulerConfig
@@ -139,8 +132,6 @@ type Runner struct {
 	handle               fwkplugin.Handle
 }
 
-// WithExecutableName sets the name of the executable containing the runner.
-// The name is used in the version log upon startup and is otherwise opaque.
 func (r *Runner) WithExecutableName(exeName string) *Runner {
 	r.eppExecutableName = exeName
 	return r
@@ -161,10 +152,11 @@ func (r *Runner) WithCustomCollectors(collectors ...prometheus.Collector) *Runne
 	return r
 }
 
+// Run is the single unified execution path for all deployment modes.
+// Discovery is fully delegated to the DiscoveryPlugin: K8s plugins own their
+// ctrl.Manager internally; the runner never calls ctrl.GetConfig() directly.
 func (r *Runner) Run(ctx context.Context) error {
-	// Setup a very basic logger in case command line argument parsing fails
 	logutil.InitSetupLogging()
-
 	setupLog.Info(r.eppExecutableName+" build", "commit-sha", version.CommitSHA, "build-ref", version.BuildRef)
 
 	opts := runserver.NewOptions()
@@ -179,262 +171,166 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Print all flag values
 	flags := make(map[string]any)
-	pflag.VisitAll(func(f *pflag.Flag) {
-		flags[f.Name] = f.Value
-	})
+	pflag.VisitAll(func(f *pflag.Flag) { flags[f.Name] = f.Value })
 	setupLog.Info("Flags processed", "flags", flags)
 
 	logutil.InitLogging(&opts.ZapOptions)
 
 	if opts.Tracing {
-		err := tracing.InitTracing(ctx, setupLog, "gateway-api-inference-extension/epp")
-		if err != nil {
+		if err := tracing.InitTracing(ctx, setupLog, "gateway-api-inference-extension/epp"); err != nil {
 			return fmt.Errorf("failed to init tracing %w", err)
 		}
 	}
 
-	// Parse config early to determine whether we need a Kubernetes cluster.
 	rawConfig, err := r.parseConfigurationPhaseOne(ctx, opts)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
 		return err
 	}
 
-	if isNoKubeMode(rawConfig) {
-		setupLog.Info("file-discovery plugin detected -- starting in no-kube mode (Kubernetes reconcilers disabled)")
-		return r.runNoKube(ctx, opts, rawConfig, rungroup.NewErrGroupRunner())
+	// Datastore -- no K8s dependency. K8s plugins set the pool via PoolSet/PoolSetStatic.
+	namespace := resolvePoolNamespace(opts.PoolNamespace)
+	poolName := opts.PoolName
+	if poolName == "" {
+		if v := os.Getenv("POD_NAME"); v != "" {
+			poolName = v
+		} else {
+			poolName = "epp"
+		}
 	}
-
-	// --- Get Kubernetes Config ---
-	cfg, err := ctrl.GetConfig()
-	if err != nil {
-		setupLog.Error(err, "Failed to get Kubernetes rest config")
-		return err
-	}
-
-	pmc, err := backendmetrics.NewPodMetricsClientImpl(setupLog, backendmetrics.Config{
-		ModelServerMetricsScheme:        opts.ModelServerMetricsScheme,
-		ModelServerMetricsHTTPSInsecure: opts.ModelServerMetricsHTTPSInsecure,
-		ModelServerMetricsPath:          opts.ModelServerMetricsPath,
-
-		TotalQueuedRequestsMetric:    opts.TotalQueuedRequestsMetric,
-		TotalRunningRequestsMetric:   opts.TotalRunningRequestsMetric,
-		KVCacheUsagePercentageMetric: opts.KVCacheUsagePercentageMetric,
-		LoRAInfoMetric:               opts.LoRAInfoMetric,
-		CacheInfoMetric:              opts.CacheInfoMetric,
-	})
-	if err != nil {
-		return err
-	}
-
-	mgr, ds, serverRunner, err := r.setup(ctx, cfg, opts, pmc, nil, rawConfig)
-	if err != nil {
-		return err
-	}
-
-	setupLog.Info("Controller manager starting")
-	return r.runK8s(ctx, opts, ds, serverRunner, rungroup.NewManagerRunner(mgr))
-}
-
-// setup configures the internal state of the Runner, including the manager,
-// datastore, and other server components. It returns the initialized Manager
-// and ExtProcServerRunner without starting them, allowing for flexible use in
-// integration tests and the unified runWithGroup path.
-// rawConfig must already be parsed by parseConfigurationPhaseOne before calling setup.
-func (r *Runner) setup(ctx context.Context, cfg *rest.Config, opts *runserver.Options, pmc backendmetrics.PodMetricsClient, managerOverrides []func(*ctrl.Options), rawConfig *configapi.EndpointPickerConfig) (ctrl.Manager, datastore.Datastore, *runserver.ExtProcServerRunner, error) {
 	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
+	var pmc backendmetrics.PodMetricsClient
+	if !useNewMetrics {
+		pmc, err = backendmetrics.NewPodMetricsClientImpl(setupLog, backendmetrics.Config{
+			ModelServerMetricsScheme:        opts.ModelServerMetricsScheme,
+			ModelServerMetricsHTTPSInsecure: opts.ModelServerMetricsHTTPSInsecure,
+			ModelServerMetricsPath:          opts.ModelServerMetricsPath,
+			TotalQueuedRequestsMetric:       opts.TotalQueuedRequestsMetric,
+			TotalRunningRequestsMetric:      opts.TotalRunningRequestsMetric,
+			KVCacheUsagePercentageMetric:    opts.KVCacheUsagePercentageMetric,
+			LoRAInfoMetric:                  opts.LoRAInfoMetric,
+			CacheInfoMetric:                 opts.CacheInfoMetric,
+		})
+		if err != nil {
+			return err
+		}
+	}
 	epf := r.setupMetricsCollection(useNewMetrics, opts, pmc)
-	gknn, err := extractGKNN(opts.PoolName, opts.PoolGroup, opts.PoolNamespace, opts.EndpointSelector)
-	if err != nil {
-		setupLog.Error(err, "Failed to extract GKNN")
-		return nil, nil, nil, err
-	}
+	pool := datalayer.NewEndpointPool(namespace, poolName)
+	ds := datastore.NewDatastore(ctx, epf, int32(opts.ModelServerMetricsPort)).WithEndpointPool(pool)
 
-	startCrdReconcilers := opts.EndpointSelector == "" // If endpointSelector is empty, it means it's not in the standalone mode. Then we should start the inferencePool and other CRD Reconciler.
-	controllerCfg := runserver.NewControllerConfig(startCrdReconcilers)
-	if err := controllerCfg.PopulateControllerConfig(cfg); err != nil {
-		setupLog.Error(err, "Failed to populate controller config")
-		return nil, nil, nil, err
-	}
-
-	ds, err := setupDatastore(ctx, epf, int32(opts.ModelServerMetricsPort), startCrdReconcilers,
-		gknn.Namespace, gknn.Name, opts.EndpointSelector, opts.EndpointTargetPorts)
-	if err != nil {
-		setupLog.Error(err, "Failed to setup datastore")
-		return nil, nil, nil, err
-	}
 	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds)
 	if err != nil {
 		setupLog.Error(err, "Failed to parse configuration")
-		return nil, nil, nil, err
+		return err
 	}
 
-	r.registerMetrics(ds)
-
-	// --- Setup Metrics Server ---
-	// Register metrics handler.
-	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
-	// More info:
-	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/metrics/server
-	// - https://book.kubebuilder.io/reference/metrics.html
-	metricsServerOptions := metricsserver.Options{
-		BindAddress: fmt.Sprintf(":%d", opts.MetricsPort),
-		FilterProvider: func() func(c *rest.Config, httpClient *http.Client) (metricsserver.Filter, error) {
-			if opts.MetricsEndpointAuth {
-				return filters.WithAuthenticationAndAuthorization
-			}
-
-			return nil
-		}(),
-	}
-
-	isLeader := &atomic.Bool{}
-	isLeader.Store(false)
-
-	mgr, err := runserver.NewDefaultManager(controllerCfg, *gknn, cfg, metricsServerOptions, opts.EnableLeaderElection, managerOverrides...)
+	disc, err := r.resolveDiscovery(rawConfig, opts, namespace, ds)
 	if err != nil {
-		setupLog.Error(err, "Failed to create controller manager")
-		return nil, nil, nil, err
+		setupLog.Error(err, "Failed to resolve discovery plugin")
+		return err
 	}
 
-	if opts.EnableLeaderElection {
-		setupLog.Info("Leader election enabled")
-		go func() {
-			<-mgr.Elected()
-			isLeader.Store(true)
-			setupLog.Info("This instance is now the leader!")
-		}()
-	} else {
-		// If leader election is disabled, all instances are "leaders" for readiness purposes.
-		isLeader.Store(true)
+	// Configure datalayer for HTTP metrics polling (no manager binding).
+	disallowedExtractorType := ""
+	if !useNewMetrics {
+		disallowedExtractorType = extractormetrics.MetricsExtractorType
+	}
+	if err := r.dlRuntime.Configure(eppConfig.DataConfig, useNewMetrics, disallowedExtractorType, setupLog); err != nil {
+		setupLog.Error(err, "Failed to configure datalayer")
+		return err
 	}
 
-	if opts.EnablePprof {
-		setupLog.Info("Setting pprof handlers")
-		if err = profiling.SetupPprofHandlers(mgr); err != nil {
-			setupLog.Error(err, "Failed to setup pprof handlers")
-			return nil, nil, nil, err
-		}
-	}
-
-	// --- Initialize Core EPP Components ---
 	if r.schedulerConfig == nil {
-		err := errors.New("scheduler config must be set either by config api or through code")
-		setupLog.Error(err, "failed to create scheduler")
-		return nil, nil, nil, err
+		return errors.New("scheduler config must be set either by config api or through code")
 	}
-
 	setupLog.Info("parsed config", "scheduler-config", r.schedulerConfig)
 
 	scheduler := scheduling.NewSchedulerWithConfig(r.schedulerConfig)
+	endpointCandidates := requestcontrol.NewDatastoreEndpointCandidates(ds,
+		requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter))
 
-	// Data layer is enabled by default; use the 'enableLegacyMetrics' feature gate to fall back to legacy polling.
-	datalayerMetricsEnabled := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
-	if err := r.configureAndStartDatalayer(ctx, datalayerMetricsEnabled, eppConfig.DataConfig, mgr); err != nil {
-		setupLog.Error(err, "failed to initialize data layer")
-		return nil, nil, nil, err
-	}
-
-	// --- Admission Control Initialization ---
 	var admissionController requestcontrol.AdmissionController
-	var endpointCandidates contracts.EndpointCandidates
-	endpointCandidates = requestcontrol.NewDatastoreEndpointCandidates(ds, requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter))
+	var epCandidates contracts.EndpointCandidates = endpointCandidates
 	if r.featureGates[flowcontrol.FeatureGate] {
-		endpointCandidates = requestcontrol.NewCachedEndpointCandidates(ctx, endpointCandidates, time.Millisecond*50)
+		epCandidates = requestcontrol.NewCachedEndpointCandidates(ctx, endpointCandidates, time.Millisecond*50)
 		setupLog.Info("Initializing experimental Flow Control layer")
 		registry, err := fcregistry.NewFlowRegistry(eppConfig.FlowControlConfig.Registry, setupLog)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize Flow Registry: %w", err)
+			return fmt.Errorf("failed to initialize Flow Registry: %w", err)
 		}
-		fc, err := fccontroller.NewFlowController(
-			ctx,
-			opts.PoolName,
-			eppConfig.FlowControlConfig.Controller,
+		fc, err := fccontroller.NewFlowController(ctx, opts.PoolName, eppConfig.FlowControlConfig.Controller,
 			fccontroller.Deps{
 				Registry:           registry,
 				SaturationDetector: eppConfig.SaturationDetector,
-				EndpointCandidates: endpointCandidates,
+				EndpointCandidates: epCandidates,
 				UsageLimitPolicy:   eppConfig.FlowControlConfig.UsageLimitPolicy,
-			},
-		)
+			})
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize Flow Controller: %w", err)
+			return fmt.Errorf("failed to initialize Flow Controller: %w", err)
 		}
 		go registry.Run(ctx)
 		admissionController = requestcontrol.NewFlowControlAdmissionController(fc, opts.PoolName)
 	} else {
 		setupLog.Info("Experimental Flow Control layer is disabled, using legacy admission control")
-		admissionController = requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
+		admissionController = requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, epCandidates)
 	}
 
-	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
-
+	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, epCandidates, r.requestControlConfig)
 	useExperimental := r.featureGates[datalayer.ExperimentalDatalayerFeatureGate] || !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
 	serverRunner := r.buildServerRunner(opts, ds, director, eppConfig, useExperimental)
-	serverRunner.GKNN = *gknn
-	serverRunner.ControllerCfg = controllerCfg
+	r.registerMetrics(ds)
 
-	if err := serverRunner.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to setup EPP controllers")
-		return nil, nil, nil, err
-	}
+	setupLog.Info("EPP starting",
+		"grpcPort", opts.GRPCPort,
+		"healthPort", opts.GRPCHealthPort,
+		"metricsPort", opts.MetricsPort,
+		"pool", poolName,
+		"namespace", namespace,
+		"discoveryPlugin", rawConfig.Discovery)
 
-	return mgr, ds, serverRunner, nil
+	g := rungroup.New()
+	g.Add("discovery", func(ctx context.Context) error { return disc.Start(ctx, discovery.NewNotifier(ds)) })
+	g.Add("pollers", r.dlRuntime.StartPollers)
+	r.addCommonRunnables(g, opts, ds, serverRunner)
+	return g.Run(ctx)
 }
 
-// NewEndpointPoolFromOptions constructs an EndpointPool from standalone options.
-// This is shared between the production runner and standalone integration tests.
-func NewEndpointPoolFromOptions(
-	namespace string,
-	name string,
-	endpointSelector string,
-	endpointTargetPorts []int,
-) (*datalayer.EndpointPool, error) {
-	// namespace is from epp namespace in standalone mode without inference api support
-	if namespace == "" {
-		return nil, errors.New("namespace must not be empty")
-	}
-	// name is from epp name in standalone mode without inference api support
-	if name == "" {
-		return nil, errors.New("name must not be empty")
-	}
-	if endpointSelector == "" {
-		return nil, errors.New("endpoint selector must not be empty")
-	}
-	if len(endpointTargetPorts) == 0 {
-		return nil, errors.New("endpoint target ports must not be empty")
-	}
-
-	selectorMap, err := labels.ConvertSelectorToLabelsMap(endpointSelector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse endpoint selector %q: %w", endpointSelector, err)
-	}
-
-	pool := datalayer.NewEndpointPool(namespace, name)
-	pool.Selector = selectorMap
-	pool.TargetPorts = append(pool.TargetPorts, endpointTargetPorts...)
-
-	return pool, nil
-}
-
-func setupDatastore(ctx context.Context, epFactory datalayer.EndpointFactory, modelServerMetricsPort int32,
-	startCrdReconcilers bool, namespace, name, endpointSelector string, endpointTargetPorts []int) (datastore.Datastore, error) {
-
-	if startCrdReconcilers {
-		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort), nil
-	} else {
-		endpointPool, err := NewEndpointPoolFromOptions(namespace, name, endpointSelector, endpointTargetPorts)
-		if err != nil {
-			setupLog.Error(err, "Failed to construct endpoint pool from options")
-			return nil, err
+// resolveDiscovery returns the DiscoveryPlugin to use. If a discovery section is
+// present in the config it uses the referenced plugin; otherwise it synthesizes
+// a K8s plugin from CLI flags for backward compatibility.
+func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opts *runserver.Options, namespace string, ds datastore.Datastore) (discovery.DiscoveryPlugin, error) {
+	if rawConfig.Discovery != nil {
+		raw := r.handle.Plugin(rawConfig.Discovery.PluginRef)
+		if raw == nil {
+			return nil, fmt.Errorf("discovery pluginRef %q not found", rawConfig.Discovery.PluginRef)
 		}
-		return datastore.NewDatastore(ctx, epFactory, modelServerMetricsPort).WithEndpointPool(endpointPool), nil
+		disc, ok := raw.(discovery.DiscoveryPlugin)
+		if !ok {
+			return nil, fmt.Errorf("plugin %q does not implement DiscoveryPlugin", rawConfig.Discovery.PluginRef)
+		}
+		if dp, ok := raw.(k8sdiscovery.DatastoreProvider); ok {
+			dp.SetDatastore(ds)
+		}
+		return disc, nil
 	}
+
+	// Backward compat: synthesize from CLI flags.
+	if opts.EndpointSelector != "" {
+		p := k8sdiscovery.NewStaticSelectorDiscoveryPlugin(opts.EndpointSelector, namespace, opts.EndpointTargetPorts)
+		p.SetDatastore(ds)
+		return p, nil
+	}
+	if opts.PoolName == "" {
+		return nil, errors.New("--pool-name is required when no discovery plugin is configured")
+	}
+	p := k8sdiscovery.NewInferencePoolDiscoveryPlugin(opts.PoolName, namespace, opts.PoolGroup, opts.EnableLeaderElection)
+	p.SetDatastore(ds)
+	return p, nil
 }
 
-// registerInTreePlugins registers the factory functions of all known plugins
+// registerInTreePlugins registers the factory functions of all known plugins.
 func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(prefix.PrefixCacheScorerPluginType, prefix.PrefixCachePluginFactory)
 	fwkplugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
@@ -453,40 +349,36 @@ func (r *Runner) registerInTreePlugins() {
 	fwkplugin.Register(edf.EDFOrderingPolicyType, edf.EDFOrderingPolicyFactory)
 	fwkplugin.Register(slodeadline.SLODeadlineOrderingPolicyType, slodeadline.SLODeadlineOrderingPolicyFactory)
 	fwkplugin.Register(usagelimits.StaticUsageLimitPolicyType, usagelimits.StaticPolicyFactory)
-
-	// Register Request level data producer plugins as defaults for their respective data keys.
+	// Request level data producer plugins
 	fwkplugin.RegisterAsDefaultProducer(reqdataprodprefix.ApproxPrefixCachePluginType, reqdataprodprefix.ApproxPrefixCacheFactory, attrprefix.PrefixCacheMatchInfoKey)
 	fwkplugin.RegisterAsDefaultProducer(inflightload.InFlightLoadProducerType, inflightload.InFlightLoadProducerFactory, attrconcurrency.InFlightLoadKey)
 	fwkplugin.RegisterAsDefaultProducer(latencyproducer.LatencyDataProviderPluginType, latencyproducer.PredictedLatencyFactory, attrlatency.LatencyPredictionInfoKey)
-
 	// Latency predictor plugins
 	fwkplugin.Register(latencyslo.LatencyAdmissionPluginType, latencyslo.LatencyAdmissionFactory)
-
 	// Latency scoring and filtering plugins
 	fwkplugin.Register(prefixcacheaffinity.PluginType, prefixcacheaffinity.Factory)
 	fwkplugin.Register(sloheadroomtier.PluginType, sloheadroomtier.Factory)
 	fwkplugin.Register(latencyscorer.LatencyScorerType, latencyscorer.Factory)
-
-	// register filter for test purpose only (used in conformance tests)
+	// Test-only plugins
 	fwkplugin.Register(testfilter.HeaderBasedTestingFilterType, testfilter.HeaderBasedTestingFilterFactory)
-	// register response received plugin for test purpose only (used in conformance tests)
 	fwkplugin.Register(testresponsereceived.DestinationEndpointServedVerifierType, testresponsereceived.DestinationEndpointServedVerifierFactory)
-	// register datalayer metrics collection plugins
+	// Datalayer plugins
 	fwkplugin.Register(sourcemetrics.MetricsDataSourceType, sourcemetrics.MetricsDataSourceFactory)
 	fwkplugin.Register(extractormetrics.MetricsExtractorType, extractormetrics.CoreMetricsExtractorFactory)
-	// register datalayer notification source plugins
 	fwkplugin.Register(sourcenotifications.NotificationSourceType, sourcenotifications.NotificationSourceFactory)
 	fwkplugin.Register(sourcenotifications.EndpointNotificationSourceType, sourcenotifications.EndpointSourceFactory)
-	// register request control plugins
+	// Request control plugins
 	fwkplugin.Register(requestattributereporter.RequestAttributeReporterType, requestattributereporter.RequestAttributeReporterPluginFactory)
 	fwkplugin.Register(openai.OpenAIParserType, openai.OpenAIParserPluginFactory)
 	fwkplugin.Register(vllmgrpc.VllmGRPCParserType, vllmgrpc.VllmGRPCParserPluginFactory)
 	fwkplugin.Register(passthrough.PassthroughParserType, passthrough.PassthroughParserPluginFactory)
-	// register saturation detector plugins
+	// Saturation detector plugins
 	fwkplugin.Register(concurrency.ConcurrencyDetectorType, concurrency.ConcurrencyDetectorFactory)
 	fwkplugin.Register(utilization.UtilizationDetectorType, utilization.UtilizationDetectorFactory)
-	// register discovery plugins
+	// Discovery plugins
 	fwkplugin.Register(discoveryfile.PluginType, discoveryfile.Factory)
+	fwkplugin.Register(k8sdiscovery.InferencePoolPluginType, k8sdiscovery.InferencePoolFactory)
+	fwkplugin.Register(k8sdiscovery.StaticSelectorPluginType, k8sdiscovery.StaticSelectorFactory)
 }
 
 func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver.Options) (*configapi.EndpointPickerConfig, error) {
@@ -495,7 +387,7 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 	var configBytes []byte
 	if opts.ConfigText != "" {
 		configBytes = []byte(opts.ConfigText)
-	} else if opts.ConfigFile != "" { // if config was specified through a file
+	} else if opts.ConfigFile != "" {
 		var err error
 		configBytes, err = os.ReadFile(opts.ConfigFile)
 		if err != nil {
@@ -513,7 +405,6 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config - %w", err)
 	}
-
 	r.featureGates = featureGates
 
 	if r.featureGates[datalayer.ExperimentalDatalayerFeatureGate] {
@@ -521,7 +412,6 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 			"Please remove the 'dataLayer' feature gate from your config. " +
 			"To fall back to legacy metrics polling, use the 'enableLegacyMetrics' feature gate.")
 	}
-
 	if r.featureGates[datalayer.EnableLegacyMetricsFeatureGate] {
 		setupLog.Info("Data layer: using legacy metrics polling (opt-in via 'enableLegacyMetrics' feature gate)")
 	} else {
@@ -531,12 +421,10 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 	return rawConfig, nil
 }
 
-// Return a function that can be used in the EPP Handle to list pod names.
 func makePodListFunc(ds datastore.Datastore) func() []types.NamespacedName {
 	return func() []types.NamespacedName {
 		pods := ds.PodList(datastore.AllPodsPredicate)
 		names := make([]types.NamespacedName, 0, len(pods))
-
 		for _, p := range pods {
 			names = append(names, p.GetMetadata().NamespacedName)
 		}
@@ -552,18 +440,13 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	handle := fwkplugin.NewEppHandle(ctx, makePodListFunc(ds))
 	r.handle = handle
 	cfg, err := loader.InstantiateAndConfigure(rawConfig, handle, logger)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to load the configuration - %w", err)
 	}
 
 	r.schedulerConfig = cfg.SchedulerConfig
-
-	// Add requestControl plugins
 	r.requestControlConfig.AddPlugins(handle.GetAllPlugins()...)
 
-	// Auto-create any DataProducer plugins that are needed by consumers already in
-	// the config but not yet satisfied by an existing producer.
 	dataProducers, err := datalayer.CreateMissingDataProducers(handle.GetAllPlugins(), fwkplugin.DefaultProducerRegistry, fwkplugin.Registry, handle)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create missing data producers - %w", err)
@@ -573,19 +456,14 @@ func (r *Runner) parseConfigurationPhaseTwo(ctx context.Context, rawConfig *conf
 	}
 	r.requestControlConfig.AddPlugins(dataProducers...)
 
-	// Sort data plugins in DAG order (topological sort). Also check DAG for cycles.
-	// This must run after auto-created producers are added so they are included in the ordering.
 	dag, err := datalayer.ValidateAndOrderDataDependencies(handle.GetAllPlugins())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load the configuration - %w", err)
 	}
-
-	// The plugins will be executed in topologically sorted order to ensure that data is produced before it is consumed.
 	r.requestControlConfig.OrderPrepareDataPlugins(dag)
 
 	r.parser = handlers.NewParser(cfg.ParserConfig)
 	logger.Info("loaded configuration from file/text successfully")
-
 	return cfg, nil
 }
 
@@ -601,22 +479,6 @@ func applyDeprecatedEnvFeatureGate(envVar, featureName, featureGate string, rawC
 	}
 }
 
-func (r *Runner) configureAndStartDatalayer(ctx context.Context, enableNewMetrics bool, cfg *datalayer.Config, mgr ctrl.Manager) error {
-	disallowedExtractorType := ""
-	if !enableNewMetrics {
-		disallowedExtractorType = extractormetrics.MetricsExtractorType
-	}
-
-	if err := r.dlRuntime.Configure(cfg, enableNewMetrics, disallowedExtractorType, setupLog); err != nil {
-		return err
-	}
-
-	if err := r.dlRuntime.Start(ctx, mgr); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.Options, pmc backendmetrics.PodMetricsClient) datalayer.EndpointFactory {
 	r.dlRuntime = datalayer.NewRuntime(opts.RefreshMetricsInterval)
 	if enableNewMetrics {
@@ -625,17 +487,12 @@ func (r *Runner) setupMetricsCollection(enableNewMetrics bool, opts *runserver.O
 	return backendmetrics.NewPodMetricsFactory(pmc, opts.RefreshMetricsInterval)
 }
 
-// registerMetrics registers Prometheus collectors and records build info.
-// Called by both the K8s and no-kube paths before starting servers.
 func (r *Runner) registerMetrics(ds datastore.Datastore) {
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
 	metrics.Register(r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 }
 
-// buildServerRunner constructs an ExtProcServerRunner with the fields common to
-// both the K8s and no-kube paths. Callers may set K8s-specific fields (GKNN,
-// ControllerCfg) on the returned value before use.
 func (r *Runner) buildServerRunner(opts *runserver.Options, ds datastore.Datastore, director *requestcontrol.Director, eppConfig *config.Config, useExperimentalDatalayer bool) *runserver.ExtProcServerRunner {
 	return &runserver.ExtProcServerRunner{
 		GrpcPort:                         opts.GRPCPort,
@@ -653,8 +510,6 @@ func (r *Runner) buildServerRunner(opts *runserver.Options, ds datastore.Datasto
 	}
 }
 
-// addCommonRunnables adds the ext-proc, health, and metrics servers to g.
-// These runnables are shared between the K8s and no-kube execution paths.
 func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner) {
 	logger := ctrl.Log.WithName("ext-proc")
 	g.Add("ext-proc", func(ctx context.Context) error {
@@ -664,12 +519,11 @@ func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Op
 	g.Add("metrics", func(ctx context.Context) error { return serveMetrics(ctx, opts.MetricsPort) })
 }
 
-// buildHealthServer returns a runnable that serves the gRPC health endpoint.
 func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSupporter) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		logger := ctrl.Log.WithName("health")
 		isLeader := &atomic.Bool{}
-		isLeader.Store(true) // no leader election in standalone health server
+		isLeader.Store(true)
 		srv := grpc.NewServer()
 		healthPb.RegisterHealthServer(srv, &healthServer{
 			logger:                logger,
@@ -682,158 +536,6 @@ func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSu
 	}
 }
 
-func extractDeploymentName(podName string) (string, error) {
-	regex := regexp.MustCompile(`^(.+)-[a-z0-9]+-[a-z0-9]+$`)
-
-	matches := regex.FindStringSubmatch(podName)
-	if len(matches) == 2 {
-		return matches[1], nil
-	}
-	return "", fmt.Errorf("failed to parse deployment name from pod name %s", podName)
-}
-
-func extractGKNN(poolName, poolGroup, poolNamespace, endpointSelector string) (*common.GKNN, error) {
-	if poolName != "" {
-		// Determine pool namespace: if --pool-namespace is non-empty, use it; else NAMESPACE env var; else default
-		resolvedPoolNamespace := resolvePoolNamespace(poolNamespace)
-		poolNamespacedName := types.NamespacedName{
-			Name:      poolName,
-			Namespace: resolvedPoolNamespace,
-		}
-		poolGroupKind := schema.GroupKind{
-			Group: poolGroup,
-			Kind:  "InferencePool",
-		}
-		return &common.GKNN{
-			NamespacedName: poolNamespacedName,
-			GroupKind:      poolGroupKind,
-		}, nil
-	}
-
-	if endpointSelector != "" {
-		// Determine EPP namespace: NAMESPACE env var; else default
-		resolvedPoolNamespace := resolvePoolNamespace(poolNamespace)
-		// Determine EPP name: POD_NAME env var
-		eppPodNameEnv := os.Getenv("POD_NAME")
-		if eppPodNameEnv == "" {
-			return nil, errors.New("failed to get environment variable POD_NAME")
-
-		}
-		eppName, err := extractDeploymentName(eppPodNameEnv)
-		if err != nil {
-			return nil, err
-		}
-		return &common.GKNN{
-			NamespacedName: types.NamespacedName{Namespace: resolvedPoolNamespace, Name: eppName},
-			GroupKind:      schema.GroupKind{Kind: "Deployment", Group: "apps"},
-		}, nil
-	}
-	return nil, errors.New("can't construct gknn as both pool-name and endpoint-selector are missing")
-}
-
-func resolvePoolNamespace(poolNamespace string) string {
-	if poolNamespace != "" {
-		return poolNamespace
-	}
-	if nsEnv := os.Getenv("NAMESPACE"); nsEnv != "" {
-		return nsEnv
-	}
-	return runserver.DefaultPoolNamespace
-}
-
-// isNoKubeMode returns true when the config references a file-discovery plugin,
-// indicating that no Kubernetes cluster is required.
-func isNoKubeMode(rawConfig *configapi.EndpointPickerConfig) bool {
-	if rawConfig.Discovery == nil {
-		return false
-	}
-	for _, p := range rawConfig.Plugins {
-		if p.Name == rawConfig.Discovery.PluginRef && p.Type == discoveryfile.PluginType {
-			return true
-		}
-	}
-	return false
-}
-
-// runK8s is the execution path for Kubernetes mode. The manager already has
-// reconcilers registered; this function adds the shared servers and starts the group.
-func (r *Runner) runK8s(ctx context.Context, opts *runserver.Options, ds datastore.Datastore, serverRunner *runserver.ExtProcServerRunner, g rungroup.RunnableGroup) error {
-	r.addCommonRunnables(g, opts, ds, serverRunner)
-	return g.Run(ctx)
-}
-
-// runNoKube is the lightweight execution path used when a file-discovery plugin is
-// configured. It skips the Kubernetes controller manager and CRD reconcilers entirely,
-// running the EPP as a standalone process connected to no cluster.
-func (r *Runner) runNoKube(ctx context.Context, opts *runserver.Options, rawConfig *configapi.EndpointPickerConfig, g rungroup.RunnableGroup) error {
-	namespace := resolvePoolNamespace(opts.PoolNamespace)
-	poolName := opts.PoolName
-	if poolName == "" {
-		if env := os.Getenv("POD_NAME"); env != "" {
-			poolName = env
-		} else {
-			poolName = "epp"
-		}
-	}
-
-	epf := r.setupMetricsCollection(true, opts, nil)
-	pool := datalayer.NewEndpointPool(namespace, poolName)
-	ds := datastore.NewDatastore(ctx, epf, int32(opts.ModelServerMetricsPort)).WithEndpointPool(pool)
-
-	eppConfig, err := r.parseConfigurationPhaseTwo(ctx, rawConfig, ds)
-	if err != nil {
-		setupLog.Error(err, "Failed to parse configuration")
-		return err
-	}
-
-	if r.schedulerConfig == nil {
-		return errors.New("scheduler config must be set either by config api or through code")
-	}
-
-	// Resolve discovery plugin.
-	rawDisc := r.handle.Plugin(rawConfig.Discovery.PluginRef)
-	if rawDisc == nil {
-		return fmt.Errorf("discovery pluginRef %q not found", rawConfig.Discovery.PluginRef)
-	}
-	disc, ok := rawDisc.(discovery.DiscoveryPlugin)
-	if !ok {
-		return fmt.Errorf("plugin %q does not implement DiscoveryPlugin", rawConfig.Discovery.PluginRef)
-	}
-
-	// Configure datalayer for HTTP metrics polling (no K8s notification binding).
-	useNewMetrics := !r.featureGates[datalayer.EnableLegacyMetricsFeatureGate]
-	disallowedExtractorType := ""
-	if !useNewMetrics {
-		disallowedExtractorType = extractormetrics.MetricsExtractorType
-	}
-	if err := r.dlRuntime.Configure(eppConfig.DataConfig, useNewMetrics, disallowedExtractorType, setupLog); err != nil {
-		return fmt.Errorf("failed to configure datalayer: %w", err)
-	}
-
-	scheduler := scheduling.NewSchedulerWithConfig(r.schedulerConfig)
-	endpointCandidates := requestcontrol.NewDatastoreEndpointCandidates(ds, requestcontrol.WithDisableEndpointSubsetFilter(opts.DisableEndpointSubsetFilter))
-	admissionController := requestcontrol.NewLegacyAdmissionController(eppConfig.SaturationDetector, endpointCandidates)
-	director := requestcontrol.NewDirectorWithConfig(ds, scheduler, admissionController, endpointCandidates, r.requestControlConfig)
-
-	r.registerMetrics(ds)
-
-	setupLog.Info("EPP starting (no-kube mode)",
-		"grpcPort", opts.GRPCPort,
-		"healthPort", opts.GRPCHealthPort,
-		"metricsPort", opts.MetricsPort,
-		"pool", poolName,
-		"namespace", namespace,
-		"discoveryPlugin", rawConfig.Discovery.PluginRef)
-
-	serverRunner := r.buildServerRunner(opts, ds, director, eppConfig, true)
-
-	g.Add("discovery", func(ctx context.Context) error { return disc.Start(ctx, discovery.NewNotifier(ds)) })
-	g.Add("pollers", r.dlRuntime.StartPollers)
-	r.addCommonRunnables(g, opts, ds, serverRunner)
-	return g.Run(ctx)
-}
-
-// serveMetrics starts a plain HTTP Prometheus metrics server.
 func serveMetrics(ctx context.Context, port int) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
@@ -846,4 +548,14 @@ func serveMetrics(ctx context.Context, port int) error {
 		return fmt.Errorf("metrics server error: %w", err)
 	}
 	return nil
+}
+
+func resolvePoolNamespace(poolNamespace string) string {
+	if poolNamespace != "" {
+		return poolNamespace
+	}
+	if nsEnv := os.Getenv("NAMESPACE"); nsEnv != "" {
+		return nsEnv
+	}
+	return runserver.DefaultPoolNamespace
 }

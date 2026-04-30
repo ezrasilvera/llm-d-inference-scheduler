@@ -60,6 +60,10 @@ type Datastore interface {
 	// that was stored, the function triggers a resync of the pods to keep the datastore updated. If the given pool
 	// is nil, this call triggers the datastore.Clear() function.
 	PoolSet(ctx context.Context, reader client.Reader, endpointPool *datalayer.EndpointPool) error
+	// PoolSetStatic sets the pool without triggering a pod resync. Use this when the
+	// pool identity and selector are known statically (e.g. from plugin parameters)
+	// and pod discovery is handled by an external reconciler.
+	PoolSetStatic(pool *datalayer.EndpointPool)
 	PoolGet() (*datalayer.EndpointPool, error)
 	PoolHasSynced() bool
 	PoolLabelsMatch(podLabels map[string]string) bool
@@ -130,6 +134,12 @@ type datastore struct {
 func (ds *datastore) WithEndpointPool(pool *datalayer.EndpointPool) *datastore {
 	ds.pool = pool
 	return ds
+}
+
+func (ds *datastore) PoolSetStatic(pool *datalayer.EndpointPool) {
+	ds.mu.Lock()
+	ds.pool = pool
+	ds.mu.Unlock()
 }
 
 func (ds *datastore) Clear() {
