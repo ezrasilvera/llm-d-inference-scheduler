@@ -316,12 +316,19 @@ func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opt
 		return disc, nil
 	}
 
-	// Backward compat: synthesize from CLI flags.
+	// Backward compat: pre-discovery-plugin deployments that pass --endpoint-selector
+	// on the CLI instead of a config file discovery section. These configs predate the
+	// DiscoveryPlugin abstraction and must continue to work without a config migration.
 	if opts.EndpointSelector != "" {
 		p := k8sdiscovery.NewStaticSelectorDiscoveryPlugin(opts.EndpointSelector, namespace, opts.EndpointTargetPorts)
 		p.SetDatastore(ds)
 		return p, nil
 	}
+
+	// Backward compat: the default K8s mode where --pool-name identifies the
+	// InferencePool CRD to watch. This is the original EPP deployment model;
+	// configs without a discovery section default to this behaviour so that
+	// existing deployments require no changes.
 	if opts.PoolName == "" {
 		return nil, errors.New("--pool-name is required when no discovery plugin is configured")
 	}
