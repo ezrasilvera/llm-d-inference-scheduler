@@ -1,0 +1,146 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram name="Discovery Sequence" id="discovery-sequence">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== TITLE ===== -->
+        <mxCell id="title1" value="(A) InferencePool Discovery -- K8s mode" style="text;fontStyle=1;fontSize=14;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===== PARTICIPANTS (A) ===== -->
+        <mxCell id="p_run"   value="Runner.Run()" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="40"   y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_rdisc" value="resolveDiscovery()" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="200"  y="50" width="140" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_rg"    value="errGroupRunner" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="380"  y="50" width="130" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_ip"    value="InferencePool&#xa;DiscoveryPlugin" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="550"  y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_mgr"   value="ctrl.Manager&#xa;(internal)" style="rounded=1;fillColor=#82b366;fontColor=#ffffff;strokeColor=#5d8a5e;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="710"  y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_iprec" value="InferencePool&#xa;Reconciler" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="870"  y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_prec"  value="podNotifier&#xa;Reconciler" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1030" y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_not"   value="Notifier&#xa;(datastoreNotifier)" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1190" y="50" width="130" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_ds"    value="Datastore" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1370" y="50" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="p_dl"    value="Datalayer&#xa;Runtime" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1540" y="50" width="120" height="40" as="geometry"/></mxCell>
+
+        <!-- lifelines -->
+        <mxCell id="ll_run"   style="endArrow=none;strokeColor=#6c8ebf;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="100"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100"  y="90"/><mxPoint x="100"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_rd"    style="endArrow=none;strokeColor=#9673a6;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="270"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="270"  y="90"/><mxPoint x="270"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_rg"    style="endArrow=none;strokeColor=#d6b656;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="445"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="445"  y="90"/><mxPoint x="445"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_ip"    style="endArrow=none;strokeColor=#82b366;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="610"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610"  y="90"/><mxPoint x="610"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_mgr"   style="endArrow=none;strokeColor=#5d8a5e;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="770"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="770"  y="90"/><mxPoint x="770"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_ipr"   style="endArrow=none;strokeColor=#666666;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="930"  y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="930"  y="90"/><mxPoint x="930"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_pr"    style="endArrow=none;strokeColor=#d79b00;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="1090" y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1090" y="90"/><mxPoint x="1090" y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_not"   style="endArrow=none;strokeColor=#d79b00;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="1255" y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1255" y="90"/><mxPoint x="1255" y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_ds"    style="endArrow=none;strokeColor=#b85450;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="1430" y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1430" y="90"/><mxPoint x="1430" y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="ll_dl"    style="endArrow=none;strokeColor=#d6b656;strokeDashArray=6;" edge="1" parent="1"><mxGeometry x="1600" y="90" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1600" y="90"/><mxPoint x="1600" y="1580"/></Array></mxGeometry></mxCell>
+
+        <!-- === STARTUP PHASE === -->
+        <mxCell id="s1" value="parseConfigurationPhaseOne/Two()" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="120" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="120"/><mxPoint x="270" y="120"/></Array></mxGeometry></mxCell>
+        <mxCell id="s2" value="NewDatastore() + registerMetrics()" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="145" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="145"/><mxPoint x="1430" y="145"/></Array></mxGeometry></mxCell>
+        <mxCell id="s3" value="resolveDiscovery(config, opts, ds)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="170" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="170"/><mxPoint x="270" y="170"/></Array></mxGeometry></mxCell>
+        <mxCell id="s4" value="NewInferencePoolDiscoveryPlugin(poolName, ns, group, leaderElect)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry x="270" y="195" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="270" y="195"/><mxPoint x="610" y="195"/></Array></mxGeometry></mxCell>
+        <mxCell id="s5" value="disc [returned]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;dashed=1;" edge="1" parent="1"><mxGeometry x="270" y="220" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="220"/><mxPoint x="100" y="220"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="s6" value="discovery.NewNotifier(ds)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="250" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="250"/><mxPoint x="1255" y="250"/></Array></mxGeometry></mxCell>
+        <mxCell id="s7" value="g.Add(&quot;discovery&quot;, disc.Start)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="275" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="275"/><mxPoint x="445" y="275"/></Array></mxGeometry></mxCell>
+        <mxCell id="s8" value="g.Add(&quot;pollers&quot;, dlRuntime.StartPollers)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="295" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="295"/><mxPoint x="445" y="295"/></Array></mxGeometry></mxCell>
+        <mxCell id="s9" value="g.Add(ext-proc / health / metrics)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry x="100" y="315" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="315"/><mxPoint x="445" y="315"/></Array></mxGeometry></mxCell>
+        <mxCell id="s10" value="g.Run(ctx) -- starts all goroutines" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;fontStyle=1;" edge="1" parent="1"><mxGeometry x="100" y="340" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="340"/><mxPoint x="445" y="340"/></Array></mxGeometry></mxCell>
+
+        <!-- separator -->
+        <mxCell id="sep1" value="-- goroutines start concurrently --" style="text;fontStyle=2;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="400" y="355" width="800" height="20" as="geometry"/></mxCell>
+
+        <!-- disc.Start goroutine -->
+        <mxCell id="d1" value="disc.Start(ctx, notifier)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;fontStyle=1;" edge="1" parent="1"><mxGeometry x="445" y="385" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="445" y="385"/><mxPoint x="610" y="385"/></Array></mxGeometry></mxCell>
+        <mxCell id="d2" value="ctrl.GetConfig()" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry x="610" y="410" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="410"/><mxPoint x="770" y="410"/></Array></mxGeometry></mxCell>
+        <mxCell id="d3" value="ctrl.NewManager(opts: metrics=disabled)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry x="610" y="435" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="435"/><mxPoint x="770" y="435"/></Array></mxGeometry></mxCell>
+        <mxCell id="d4" value="InferencePoolReconciler.SetupWithManager(mgr)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry x="610" y="460" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="460"/><mxPoint x="930" y="460"/></Array></mxGeometry></mxCell>
+        <mxCell id="d5" value="podNotifierReconciler.SetupWithManager(mgr)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry x="610" y="485" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="485"/><mxPoint x="1090" y="485"/></Array></mxGeometry></mxCell>
+        <mxCell id="d6" value="mgr.Start(ctx)  [blocks]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#5d8a5e;fontStyle=1;" edge="1" parent="1"><mxGeometry x="610" y="515" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="610" y="515"/><mxPoint x="770" y="515"/></Array></mxGeometry></mxCell>
+
+        <!-- dlRuntime goroutine -->
+        <mxCell id="dl1" value="StartPollers(ctx)  [blocks until ctx cancelled]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d6b656;" edge="1" parent="1"><mxGeometry x="445" y="540" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="445" y="540"/><mxPoint x="1600" y="540"/></Array></mxGeometry></mxCell>
+
+        <!-- separator -->
+        <mxCell id="sep2" value="-- K8s events arrive asynchronously --" style="text;fontStyle=2;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="700" y="565" width="600" height="20" as="geometry"/></mxCell>
+
+        <!-- InferencePool CRD event -->
+        <mxCell id="ev1" value="K8s: InferencePool created/updated" style="fillColor=#f0f0f0;strokeColor=#666666;fontSize=9;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="740" y="590" width="240" height="20" as="geometry"/></mxCell>
+        <mxCell id="e1a" value="Reconcile(ctx, req)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#666666;" edge="1" parent="1"><mxGeometry x="770" y="620" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="770" y="620"/><mxPoint x="930" y="620"/></Array></mxGeometry></mxCell>
+        <mxCell id="e1b" value="ds.PoolSet(ctx, reader, endpointPool)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry x="930" y="645" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="930" y="645"/><mxPoint x="1430" y="645"/></Array></mxGeometry></mxCell>
+
+        <!-- Pod event -->
+        <mxCell id="ev2" value="K8s: Pod ready (labels match pool selector)" style="fillColor=#f0f0f0;strokeColor=#666666;fontSize=9;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="740" y="680" width="280" height="20" as="geometry"/></mxCell>
+        <mxCell id="e2a" value="Reconcile(ctx, req)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry x="770" y="710" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="770" y="710"/><mxPoint x="1090" y="710"/></Array></mxGeometry></mxCell>
+        <mxCell id="e2b" value="ds.PoolHasSynced() [gate]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;dashed=1;" edge="1" parent="1"><mxGeometry x="1090" y="735" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1090" y="735"/><mxPoint x="1430" y="735"/></Array></mxGeometry></mxCell>
+        <mxCell id="e2c" value="podToEndpoints(pod, ports())" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry x="1090" y="760" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1090" y="760"/><mxPoint x="1090" y="760"/></Array></mxGeometry></mxCell>
+        <mxCell id="e2d" value="notifier.Upsert(meta)  [per active port]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;fontStyle=1;" edge="1" parent="1"><mxGeometry x="1090" y="785" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1090" y="785"/><mxPoint x="1255" y="785"/></Array></mxGeometry></mxCell>
+        <mxCell id="e2e" value="ds.BackendUpsert(ctx, meta)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry x="1255" y="810" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1255" y="810"/><mxPoint x="1430" y="810"/></Array></mxGeometry></mxCell>
+        <mxCell id="e2f" value="epf.NewEndpoint(ctx, meta) -- starts HTTP metrics poller" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry x="1430" y="835" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1430" y="835"/><mxPoint x="1600" y="835"/></Array></mxGeometry></mxCell>
+
+        <!-- Pod deleted event -->
+        <mxCell id="ev3" value="K8s: Pod deleted / not ready" style="fillColor=#f0f0f0;strokeColor=#666666;fontSize=9;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="740" y="865" width="220" height="20" as="geometry"/></mxCell>
+        <mxCell id="e3a" value="Reconcile(ctx, req)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;" edge="1" parent="1"><mxGeometry x="770" y="895" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="770" y="895"/><mxPoint x="1090" y="895"/></Array></mxGeometry></mxCell>
+        <mxCell id="e3b" value="notifier.Delete(id)  [per port]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;fontStyle=1;" edge="1" parent="1"><mxGeometry x="1090" y="920" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1090" y="920"/><mxPoint x="1255" y="920"/></Array></mxGeometry></mxCell>
+        <mxCell id="e3c" value="ds.BackendDelete(id)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry x="1255" y="945" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1255" y="945"/><mxPoint x="1430" y="945"/></Array></mxGeometry></mxCell>
+
+        <!-- polling -->
+        <mxCell id="sep3" value="-- periodic polling (every RefreshMetricsInterval) --" style="text;fontStyle=2;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1380" y="965" width="380" height="20" as="geometry"/></mxCell>
+        <mxCell id="e4a" value="HTTP GET /metrics [per endpoint]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d6b656;" edge="1" parent="1"><mxGeometry x="1600" y="995" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1600" y="995"/><mxPoint x="1700" y="995"/></Array></mxGeometry></mxCell>
+        <mxCell id="e4b" value="ep.UpdateMetadata(metrics)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d6b656;" edge="1" parent="1"><mxGeometry x="1700" y="1015" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="1700" y="1015"/><mxPoint x="1430" y="1015"/></Array></mxGeometry></mxCell>
+
+        <!-- ===== SEPARATOR BETWEEN FLOWS ===== -->
+        <mxCell id="divider" style="endArrow=none;strokeColor=#000000;strokeWidth=2;" edge="1" parent="1"><mxGeometry x="40" y="1060" width="1" height="1" relative="1" as="geometry"><Array as="points"><mxPoint x="40" y="1060"/><mxPoint x="1750" y="1060"/></Array></mxGeometry></mxCell>
+
+        <!-- ===== TITLE (B) ===== -->
+        <mxCell id="title2" value="(B) File Discovery -- no-kube mode" style="text;fontStyle=1;fontSize=14;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="40" y="1075" width="400" height="30" as="geometry"/></mxCell>
+
+        <!-- ===== PARTICIPANTS (B) ===== -->
+        <mxCell id="b_run"  value="Runner.Run()" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="40"  y="1115" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_rg"   value="errGroupRunner" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="200" y="1115" width="130" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_fd"   value="FileDiscovery" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="370" y="1115" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_not"  value="Notifier&#xa;(datastoreNotifier)" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="530" y="1115" width="130" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_ds"   value="Datastore" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="700" y="1115" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_dl"   value="Datalayer&#xa;Runtime" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="870" y="1115" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_fsn"  value="fsnotify&#xa;Watcher" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1040" y="1115" width="120" height="40" as="geometry"/></mxCell>
+        <mxCell id="b_file" value="endpoints.yaml" style="shape=document;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1210" y="1110" width="120" height="50" as="geometry"/></mxCell>
+
+        <!-- lifelines B -->
+        <mxCell id="bll_run"  style="endArrow=none;strokeColor=#6c8ebf;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="100"  y="1155"/><mxPoint x="100"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_rg"   style="endArrow=none;strokeColor=#d6b656;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="265"  y="1155"/><mxPoint x="265"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_fd"   style="endArrow=none;strokeColor=#82b366;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430"  y="1155"/><mxPoint x="430"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_not"  style="endArrow=none;strokeColor=#d79b00;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="595"  y="1155"/><mxPoint x="595"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_ds"   style="endArrow=none;strokeColor=#b85450;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="760"  y="1155"/><mxPoint x="760"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_dl"   style="endArrow=none;strokeColor=#d6b656;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="930"  y="1155"/><mxPoint x="930"  y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_fsn"  style="endArrow=none;strokeColor=#666666;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1100" y="1155"/><mxPoint x="1100" y="1580"/></Array></mxGeometry></mxCell>
+        <mxCell id="bll_file" style="endArrow=none;strokeColor=#666666;strokeDashArray=6;"  edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1270" y="1165"/><mxPoint x="1270" y="1580"/></Array></mxGeometry></mxCell>
+
+        <!-- B startup -->
+        <mxCell id="b1" value="NewDatastore() + discovery.NewNotifier(ds)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="1185"/><mxPoint x="760" y="1185"/></Array></mxGeometry></mxCell>
+        <mxCell id="b2" value="g.Add(&quot;discovery&quot;, disc.Start)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="1205"/><mxPoint x="265" y="1205"/></Array></mxGeometry></mxCell>
+        <mxCell id="b3" value="g.Add(&quot;pollers&quot;, dlRuntime.StartPollers)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="1225"/><mxPoint x="265" y="1225"/></Array></mxGeometry></mxCell>
+        <mxCell id="b4" value="g.Run(ctx)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;fontStyle=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="100" y="1250"/><mxPoint x="265" y="1250"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="bsep1" value="-- goroutines start --" style="text;fontStyle=2;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="200" y="1265" width="500" height="20" as="geometry"/></mxCell>
+
+        <!-- disc.Start -->
+        <mxCell id="b5" value="disc.Start(ctx, notifier)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;fontStyle=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="265" y="1295"/><mxPoint x="430" y="1295"/></Array></mxGeometry></mxCell>
+        <mxCell id="b6" value="load(ctx, notifier)  [initial load]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1320"/><mxPoint x="430" y="1320"/></Array></mxGeometry></mxCell>
+        <mxCell id="b7" value="os.ReadFile(path)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1345"/><mxPoint x="1270" y="1345"/></Array></mxGeometry></mxCell>
+        <mxCell id="b8" value="[for each endpoint in file]  notifier.Upsert(meta)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;fontStyle=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1370"/><mxPoint x="595" y="1370"/></Array></mxGeometry></mxCell>
+        <mxCell id="b9" value="ds.BackendUpsert(ctx, meta)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="595" y="1395"/><mxPoint x="760" y="1395"/></Array></mxGeometry></mxCell>
+        <mxCell id="b9b" value="epf.NewEndpoint -- starts metrics poller" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#b85450;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="760" y="1420"/><mxPoint x="930" y="1420"/></Array></mxGeometry></mxCell>
+
+        <!-- watchFile branch -->
+        <mxCell id="bwlabel" value="[watchFile: true]" style="fillColor=#f0f0f0;strokeColor=#666666;fontSize=9;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="400" y="1445" width="140" height="20" as="geometry"/></mxCell>
+        <mxCell id="b10" value="fsnotify.NewWatcher() + watcher.Add(path)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1475"/><mxPoint x="1100" y="1475"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="bsep2" value="-- on file change (Write/Create event) --" style="text;fontStyle=2;fontSize=9;strokeColor=none;fillColor=none;" vertex="1" parent="1"><mxGeometry x="1050" y="1495" width="340" height="20" as="geometry"/></mxCell>
+        <mxCell id="b11" value="watcher.Events (Write/Create)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#666666;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1100" y="1520"/><mxPoint x="430" y="1520"/></Array></mxGeometry></mxCell>
+        <mxCell id="b12" value="load(ctx, notifier)  [reload]" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#82b366;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1545"/><mxPoint x="430" y="1545"/></Array></mxGeometry></mxCell>
+        <mxCell id="b13" value="notifier.Upsert(new/changed)  +  notifier.Delete(removed)" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;strokeColor=#d79b00;fontStyle=1;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="1565"/><mxPoint x="595" y="1565"/></Array></mxGeometry></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
