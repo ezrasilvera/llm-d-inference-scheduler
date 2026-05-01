@@ -65,7 +65,6 @@ type FileDiscovery struct {
 }
 
 var _ discovery.EndpointDiscovery = (*FileDiscovery)(nil)
-var _ fwkplugin.Plugin = (*FileDiscovery)(nil)
 
 // Factory is the plugin factory for file-discovery.
 func Factory(name string, parameters json.RawMessage, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {

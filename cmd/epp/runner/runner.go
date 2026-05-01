@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	nhpprof "net/http/pprof"
+	"runtime"
 	"os"
 	"sync/atomic"
 	"time"
@@ -288,11 +290,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		"metricsPort", opts.MetricsPort,
 		"pool", poolName,
 		"namespace", namespace,
-		"discoveryPlugin", rawConfig.Discovery)
+		"discoveryPlugin", disc.TypedName())
 
 	g := rungroup.New()
 	g.Add("discovery", func(ctx context.Context) error { return disc.Start(ctx, discovery.NewNotifier(ds)) })
-	g.Add("pollers", r.dlRuntime.StartPollers)
+	g.Add("datalayer", r.dlRuntime.WaitForShutdown)
 	r.addCommonRunnables(g, opts, ds, serverRunner)
 	return g.Run(ctx)
 }
@@ -523,7 +525,7 @@ func (r *Runner) addCommonRunnables(g rungroup.RunnableGroup, opts *runserver.Op
 		return serverRunner.AsRunnable(logger).Start(ctx)
 	})
 	g.Add("health", buildHealthServer(ds, opts.GRPCHealthPort, r.parser))
-	g.Add("metrics", func(ctx context.Context) error { return serveMetrics(ctx, opts.MetricsPort) })
+	g.Add("metrics", func(ctx context.Context) error { return serveMetrics(ctx, opts.MetricsPort, opts.EnablePprof) })
 }
 
 func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSupporter) func(ctx context.Context) error {
@@ -543,9 +545,16 @@ func buildHealthServer(ds datastore.Datastore, port int, supporter appProtocolSu
 	}
 }
 
-func serveMetrics(ctx context.Context, port int) error {
+func serveMetrics(ctx context.Context, port int, enablePprof bool) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	if enablePprof {
+		runtime.SetMutexProfileFraction(1)
+		runtime.SetBlockProfileRate(1)
+		for _, p := range []string{"heap", "goroutine", "allocs", "threadcreate", "block", "mutex"} {
+			mux.Handle("/debug/pprof/"+p, nhpprof.Handler(p))
+		}
+	}
 	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
 	go func() {
 		<-ctx.Done()

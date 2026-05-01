@@ -16,8 +16,6 @@ limitations under the License.
 
 // Package rungroup provides a RunnableGroup abstraction for starting a set of
 // named goroutines together and propagating the first failure to all of them.
-// Two implementations are provided: ErrGroupRunner for standalone (no-kube) mode
-// and ManagerRunner for Kubernetes mode where a ctrl.Manager owns the lifecycle.
 package rungroup
 
 import (
@@ -25,10 +23,6 @@ import (
 	"fmt"
 
 	"golang.org/x/sync/errgroup"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
-	"github.com/llm-d/llm-d-inference-scheduler/internal/runnable"
 )
 
 // RunnableGroup collects named runnables and starts them together.
@@ -47,7 +41,6 @@ func New() RunnableGroup {
 }
 
 // NewErrGroupRunner returns a RunnableGroup backed by errgroup.
-// Use this in no-kube mode where no ctrl.Manager is available.
 func NewErrGroupRunner() RunnableGroup {
 	return &errGroupRunner{}
 }
@@ -77,37 +70,4 @@ func (e *errGroupRunner) Run(ctx context.Context) error {
 		})
 	}
 	return g.Wait()
-}
-
-// NewManagerRunner returns a RunnableGroup backed by a ctrl.Manager.
-// Runnables added via Add are registered with the manager using NoLeaderElection.
-// Run calls mgr.Start(ctx), which starts all registered runnables.
-// Use this in Kubernetes mode.
-func NewManagerRunner(mgr ctrl.Manager) RunnableGroup {
-	return &managerRunner{mgr: mgr}
-}
-
-type managerRunner struct {
-	mgr ctrl.Manager
-	err error
-}
-
-func (m *managerRunner) Add(name string, fn func(ctx context.Context) error) {
-	if m.err != nil {
-		return
-	}
-	wrapped := manager.RunnableFunc(func(ctx context.Context) error {
-		if err := fn(ctx); err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
-		return nil
-	})
-	m.err = m.mgr.Add(runnable.NoLeaderElection(wrapped))
-}
-
-func (m *managerRunner) Run(ctx context.Context) error {
-	if m.err != nil {
-		return m.err
-	}
-	return m.mgr.Start(ctx)
 }

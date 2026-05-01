@@ -149,11 +149,11 @@ func (r *Runtime) Start(ctx context.Context, mgr ctrl.Manager) error {
 	return err
 }
 
-// StartPollers starts data collection without a ctrl.Manager. Use this in non-K8s
-// mode where no NotificationSources are configured. Polling collectors start
-// automatically as endpoints are added via BackendUpsert; this call simply blocks
-// until ctx is cancelled so that the errgroup goroutine stays alive.
-func (r *Runtime) StartPollers(ctx context.Context) error {
+// WaitForShutdown blocks until ctx is cancelled. It exists as an errgroup
+// goroutine placeholder for deployments that do not use a ctrl.Manager.
+// Individual endpoint pollers start automatically when BackendUpsert calls
+// NewEndpoint -- no explicit "start" call is needed.
+func (r *Runtime) WaitForShutdown(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
 }
