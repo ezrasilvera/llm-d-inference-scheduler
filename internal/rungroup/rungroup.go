@@ -34,15 +34,8 @@ type RunnableGroup interface {
 }
 
 // New returns the default RunnableGroup implementation.
-// Callers should use this instead of NewErrGroupRunner so runner code
-// contains no reference to the underlying errgroup implementation.
 func New() RunnableGroup {
-	return NewErrGroupRunner()
-}
-
-// NewErrGroupRunner returns a RunnableGroup backed by errgroup.
-func NewErrGroupRunner() RunnableGroup {
-	return &errGroupRunner{}
+	return &groupRunner{}
 }
 
 type namedFn struct {
@@ -50,24 +43,24 @@ type namedFn struct {
 	fn   func(ctx context.Context) error
 }
 
-type errGroupRunner struct {
+type groupRunner struct {
 	fns []namedFn
 }
 
-func (e *errGroupRunner) Add(name string, fn func(ctx context.Context) error) {
-	e.fns = append(e.fns, namedFn{name: name, fn: fn})
+func (g *groupRunner) Add(name string, fn func(ctx context.Context) error) {
+	g.fns = append(g.fns, namedFn{name: name, fn: fn})
 }
 
-func (e *errGroupRunner) Run(ctx context.Context) error {
-	g, gctx := errgroup.WithContext(ctx)
-	for _, nf := range e.fns {
+func (g *groupRunner) Run(ctx context.Context) error {
+	eg, ectx := errgroup.WithContext(ctx)
+	for _, nf := range g.fns {
 		nf := nf
-		g.Go(func() error {
-			if err := nf.fn(gctx); err != nil {
+		eg.Go(func() error {
+			if err := nf.fn(ectx); err != nil {
 				return fmt.Errorf("%s: %w", nf.name, err)
 			}
 			return nil
 		})
 	}
-	return g.Wait()
+	return eg.Wait()
 }
