@@ -153,7 +153,7 @@ func (r *Runner) WithCustomCollectors(collectors ...prometheus.Collector) *Runne
 }
 
 // Run is the single unified execution path for all deployment modes.
-// Discovery is fully delegated to the DiscoveryPlugin: K8s plugins own their
+// Discovery is fully delegated to the EndpointDiscovery: K8s plugins own their
 // ctrl.Manager internally; the runner never calls ctrl.GetConfig() directly.
 func (r *Runner) Run(ctx context.Context) error {
 	logutil.InitSetupLogging()
@@ -297,18 +297,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	return g.Run(ctx)
 }
 
-// resolveDiscovery returns the DiscoveryPlugin to use. If a discovery section is
+// resolveDiscovery returns the EndpointDiscovery to use. If a discovery section is
 // present in the config it uses the referenced plugin; otherwise it synthesizes
 // a K8s plugin from CLI flags for backward compatibility.
-func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opts *runserver.Options, namespace string, ds datastore.Datastore) (discovery.DiscoveryPlugin, error) {
+func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opts *runserver.Options, namespace string, ds datastore.Datastore) (discovery.EndpointDiscovery, error) {
 	if rawConfig.Discovery != nil {
 		raw := r.handle.Plugin(rawConfig.Discovery.PluginRef)
 		if raw == nil {
 			return nil, fmt.Errorf("discovery pluginRef %q not found", rawConfig.Discovery.PluginRef)
 		}
-		disc, ok := raw.(discovery.DiscoveryPlugin)
+		disc, ok := raw.(discovery.EndpointDiscovery)
 		if !ok {
-			return nil, fmt.Errorf("plugin %q does not implement DiscoveryPlugin", rawConfig.Discovery.PluginRef)
+			return nil, fmt.Errorf("plugin %q does not implement EndpointDiscovery", rawConfig.Discovery.PluginRef)
 		}
 		if dp, ok := raw.(k8sdiscovery.DatastoreProvider); ok {
 			dp.SetDatastore(ds)
@@ -318,7 +318,7 @@ func (r *Runner) resolveDiscovery(rawConfig *configapi.EndpointPickerConfig, opt
 
 	// Backward compat: pre-discovery-plugin deployments that pass --endpoint-selector
 	// on the CLI instead of a config file discovery section. These configs predate the
-	// DiscoveryPlugin abstraction and must continue to work without a config migration.
+	// EndpointDiscovery abstraction and must continue to work without a config migration.
 	if opts.EndpointSelector != "" {
 		p := k8sdiscovery.NewStaticSelectorDiscoveryPlugin(opts.EndpointSelector, namespace, opts.EndpointTargetPorts)
 		p.SetDatastore(ds)

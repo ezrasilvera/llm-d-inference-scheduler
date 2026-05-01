@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package k8s provides DiscoveryPlugin implementations that discover inference
+// Package k8s provides EndpointDiscovery implementations that discover inference
 // endpoints by watching Kubernetes pods. Both plugins own their ctrl.Manager
 // internally -- the runner does not call ctrl.GetConfig() or ctrl.NewManager().
 //
@@ -232,7 +232,7 @@ type InferencePoolDiscoveryPlugin struct {
 	ds            datastore.Datastore
 }
 
-var _ discovery.DiscoveryPlugin = (*InferencePoolDiscoveryPlugin)(nil)
+var _ discovery.EndpointDiscovery = (*InferencePoolDiscoveryPlugin)(nil)
 var _ fwkplugin.Plugin = (*InferencePoolDiscoveryPlugin)(nil)
 var _ DatastoreProvider = (*InferencePoolDiscoveryPlugin)(nil)
 
@@ -396,7 +396,7 @@ type StaticSelectorDiscoveryPlugin struct {
 	ds           datastore.Datastore
 }
 
-var _ discovery.DiscoveryPlugin = (*StaticSelectorDiscoveryPlugin)(nil)
+var _ discovery.EndpointDiscovery = (*StaticSelectorDiscoveryPlugin)(nil)
 var _ fwkplugin.Plugin = (*StaticSelectorDiscoveryPlugin)(nil)
 var _ DatastoreProvider = (*StaticSelectorDiscoveryPlugin)(nil)
 

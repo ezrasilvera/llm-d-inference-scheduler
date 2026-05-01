@@ -203,7 +203,7 @@ func (opts *Options) Complete() error {
 }
 
 func (opts *Options) Validate() error {
-	// Both flags may be absent when a DiscoveryPlugin is configured in the config file
+	// Both flags may be absent when an EndpointDiscovery is configured in the config file
 	// (e.g. file-discovery). Reject only the ambiguous case where both are set.
 	if opts.PoolName != "" && opts.EndpointSelector != "" {
 		return errors.New("pool-name and endpoint-selector are mutually exclusive; set only one")

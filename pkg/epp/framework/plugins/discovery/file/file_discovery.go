@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package file provides a file-based DiscoveryPlugin implementation that reads
+// Package file provides a file-based EndpointDiscovery implementation that reads
 // a YAML (or JSON) file listing inference endpoints.
 package file
 
@@ -56,7 +56,7 @@ type params struct {
 	WatchFile bool   `json:"watchFile"`
 }
 
-// FileDiscovery implements DiscoveryPlugin by reading a static endpoints file.
+// FileDiscovery implements EndpointDiscovery by reading a static endpoints file.
 type FileDiscovery struct {
 	typedName fwkplugin.TypedName
 	path      string
@@ -64,7 +64,7 @@ type FileDiscovery struct {
 	current   map[types.NamespacedName]struct{}
 }
 
-var _ discovery.DiscoveryPlugin = (*FileDiscovery)(nil)
+var _ discovery.EndpointDiscovery = (*FileDiscovery)(nil)
 var _ fwkplugin.Plugin = (*FileDiscovery)(nil)
 
 // Factory is the plugin factory for file-discovery.

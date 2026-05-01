@@ -69,7 +69,7 @@ type EndpointPickerConfig struct {
 	Parser *ParserConfig `json:"parser,omitempty"`
 
 	// +optional
-	// Discovery specifies which DiscoveryPlugin to use for populating the endpoint datastore.
+	// Discovery specifies which EndpointDiscovery to use for populating the endpoint datastore.
 	// When set, the EPP bypasses Kubernetes CRD reconcilers and relies entirely on the
 	// referenced plugin to enumerate and track inference endpoints. This enables running
 	// the EPP without a Kubernetes cluster (e.g. on Slurm or Ray).
@@ -289,7 +289,7 @@ type DiscoveryConfig struct {
 	// +required
 	// +kubebuilder:validation:Required
 	// PluginRef is the name of the plugin instance (from the Plugins list) that implements
-	// DiscoveryPlugin. The referenced plugin drives the endpoint lifecycle in the datastore.
+	// EndpointDiscovery. The referenced plugin drives the endpoint lifecycle in the datastore.
 	PluginRef string `json:"pluginRef"`
 }
 
