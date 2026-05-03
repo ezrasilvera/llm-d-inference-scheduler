@@ -1,333 +1,269 @@
-<mxfile host="app.diagrams.net" version="24.0.0">
-  <diagram name="Discovery Architecture" id="discovery-arch">
-    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-
-        <!-- ===== RUNNER ===== -->
-        <mxCell id="runner" value="Runner (cmd/epp/runner)" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="1560" height="210" as="geometry" />
-        </mxCell>
-
-        <!-- RunnableGroup -->
-        <mxCell id="rg" value="RunnableGroup (errgroup)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" vertex="1" parent="runner">
-          <mxGeometry x="20" y="50" width="200" height="50" as="geometry" />
-        </mxCell>
-
-        <!-- goroutine: discovery -->
-        <mxCell id="g_disc" value="g.Add(&quot;discovery&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="260" y="50" width="160" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- goroutine: pollers -->
-        <mxCell id="g_poll" value="g.Add(&quot;pollers&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="440" y="50" width="140" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- goroutine: ext-proc -->
-        <mxCell id="g_ext" value="g.Add(&quot;ext-proc&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="600" y="50" width="140" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- goroutine: health -->
-        <mxCell id="g_health" value="g.Add(&quot;health&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="760" y="50" width="140" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- goroutine: metrics -->
-        <mxCell id="g_metrics" value="g.Add(&quot;metrics&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="920" y="50" width="140" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- resolveDiscovery -->
-        <mxCell id="resolve" value="resolveDiscovery()&#xa;(from config or CLI flags)" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="260" y="120" width="200" height="50" as="geometry" />
-        </mxCell>
-
-        <!-- Datastore setup -->
-        <mxCell id="ds_setup" value="NewDatastore()&#xa;+ registerMetrics()&#xa;+ buildServerRunner()" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="runner">
-          <mxGeometry x="480" y="120" width="180" height="50" as="geometry" />
-        </mxCell>
-
-        <!-- arrow: rg to goroutines -->
-        <mxCell id="e_rg_g" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="rg" target="g_disc" parent="runner">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_rg_g2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="rg" target="g_poll" parent="runner">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_rg_g3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="rg" target="g_ext" parent="runner">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_rg_g4" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="rg" target="g_health" parent="runner">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_rg_g5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="rg" target="g_metrics" parent="runner">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- ===== DISCOVERY PLUGINS ===== -->
-
-        <!-- InferencePool plugin -->
-        <mxCell id="ip" value="InferencePoolDiscoveryPlugin&#xa;(pkg/.../discovery/k8s)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="40" y="310" width="340" height="260" as="geometry" />
-        </mxCell>
-        <mxCell id="ip_mgr" value="ctrl.Manager (internal)" style="rounded=1;fillColor=#82b366;fontColor=#ffffff;strokeColor=#5d8a5e;fontSize=10;fontStyle=1;" vertex="1" parent="ip">
-          <mxGeometry x="20" y="50" width="300" height="35" as="geometry" />
-        </mxCell>
-        <mxCell id="ip_pool" value="InferencePoolReconciler&#xa;-- watches InferencePool CRD&#xa;-- calls ds.PoolSet()" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ip">
-          <mxGeometry x="20" y="100" width="300" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="ip_pod" value="podNotifierReconciler&#xa;-- watches Pods&#xa;-- calls notifier.Upsert/Delete" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ip">
-          <mxGeometry x="20" y="165" width="300" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="ip_obj" value="InferenceObjective + ModelRewrite Reconcilers&#xa;(optional, if CRDs installed)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ip">
-          <mxGeometry x="20" y="210" width="300" height="35" as="geometry" />
-        </mxCell>
-
-        <!-- StaticSelector plugin -->
-        <mxCell id="ss" value="StaticSelectorDiscoveryPlugin&#xa;(pkg/.../discovery/k8s)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="420" y="310" width="320" height="200" as="geometry" />
-        </mxCell>
-        <mxCell id="ss_pool" value="ds.PoolSetStatic(pool)&#xa;-- selector + ports from params" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ss">
-          <mxGeometry x="20" y="50" width="280" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="ss_mgr" value="ctrl.Manager (internal)" style="rounded=1;fillColor=#82b366;fontColor=#ffffff;strokeColor=#5d8a5e;fontSize=10;fontStyle=1;" vertex="1" parent="ss">
-          <mxGeometry x="20" y="100" width="280" height="35" as="geometry" />
-        </mxCell>
-        <mxCell id="ss_pod" value="podNotifierReconciler&#xa;-- watches Pods&#xa;-- calls notifier.Upsert/Delete" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ss">
-          <mxGeometry x="20" y="145" width="280" height="45" as="geometry" />
-        </mxCell>
-
-        <!-- File Discovery plugin -->
-        <mxCell id="fd" value="FileDiscoveryPlugin&#xa;(pkg/.../discovery/file)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="780" y="310" width="300" height="200" as="geometry" />
-        </mxCell>
-        <mxCell id="fd_load" value="load() -- reads YAML/JSON file&#xa;calls notifier.Upsert per endpoint&#xa;calls notifier.Delete for removed" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="fd">
-          <mxGeometry x="20" y="50" width="260" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="fd_watch" value="fsnotify watcher&#xa;(when watchFile: true)&#xa;re-calls load() on file change" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="fd">
-          <mxGeometry x="20" y="120" width="260" height="55" as="geometry" />
-        </mxCell>
-
-        <!-- ===== NOTIFIER interface ===== -->
-        <mxCell id="notifier" value="discovery.Notifier&#xa;(interface)" style="ellipse;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="360" width="180" height="80" as="geometry" />
-        </mxCell>
-
-        <mxCell id="notifier_impl" value="datastoreNotifier&#xa;(discovery.NewNotifier(ds))" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="1110" y="480" width="200" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- ===== DATASTORE ===== -->
-        <mxCell id="ds" value="Datastore" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="1120" y="570" width="380" height="200" as="geometry" />
-        </mxCell>
-        <mxCell id="ds_pool" value="pool (EndpointPool)&#xa;selector, targetPorts, namespace" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ds">
-          <mxGeometry x="20" y="45" width="340" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="ds_pods" value="pods (sync.Map)&#xa;NamespacedName -&gt; Endpoint" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ds">
-          <mxGeometry x="20" y="95" width="340" height="40" as="geometry" />
-        </mxCell>
-        <mxCell id="ds_obj" value="objectives, modelRewrites" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="ds">
-          <mxGeometry x="20" y="145" width="340" height="35" as="geometry" />
-        </mxCell>
-
-        <!-- ===== DATALAYER RUNTIME ===== -->
-        <mxCell id="dl" value="Datalayer Runtime" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" vertex="1" parent="1">
-          <mxGeometry x="40" y="640" width="380" height="150" as="geometry" />
-        </mxCell>
-        <mxCell id="dl_cfg" value="Configure() -- sets up polling sources" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="dl">
-          <mxGeometry x="20" y="45" width="340" height="35" as="geometry" />
-        </mxCell>
-        <mxCell id="dl_poll" value="StartPollers() -- per-endpoint HTTP metrics polling&#xa;scrapes /metrics from each inference server" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="dl">
-          <mxGeometry x="20" y="90" width="340" height="45" as="geometry" />
-        </mxCell>
-
-        <!-- ===== EPP SERVERS ===== -->
-        <mxCell id="extproc" value="ext-proc gRPC server&#xa;(port 9002)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="480" y="660" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="health" value="health gRPC server&#xa;(port 9003)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="700" y="660" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="prom" value="Prometheus HTTP server&#xa;(port 9090)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="920" y="660" width="200" height="60" as="geometry" />
-        </mxCell>
-
-        <!-- ===== ENVOY ===== -->
-        <mxCell id="envoy" value="Envoy&#xa;(ext_proc filter)" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="480" y="790" width="200" height="60" as="geometry" />
-        </mxCell>
-
-        <!-- ===== EDGES ===== -->
-
-        <!-- runner goroutine -> discovery plugins -->
-        <mxCell id="e1" value="disc.Start(ctx, notifier)" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;fontStyle=2;fontSize=9;" edge="1" source="g_disc" target="ip" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="340" y="280" />
-              <mxPoint x="210" y="280" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;" edge="1" source="g_disc" target="ss" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="340" y="280" />
-              <mxPoint x="580" y="280" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;" edge="1" source="g_disc" target="fd" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="340" y="280" />
-              <mxPoint x="930" y="280" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e_disc_label" value="one of (from config or CLI flags)" style="text;fontSize=9;fontStyle=2;strokeColor=none;fillColor=none;" vertex="1" parent="1">
-          <mxGeometry x="200" y="265" width="220" height="20" as="geometry" />
-        </mxCell>
-
-        <!-- runner -> pollers -->
-        <mxCell id="e_poll" value="dlRuntime.StartPollers()" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#d6b656;fontStyle=2;fontSize=9;" edge="1" source="g_poll" target="dl" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- runner -> ext-proc -->
-        <mxCell id="e_ext" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" edge="1" source="g_ext" target="extproc" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- runner -> health -->
-        <mxCell id="e_hlt" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" edge="1" source="g_health" target="health" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- runner -> metrics -->
-        <mxCell id="e_met" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" edge="1" source="g_metrics" target="prom" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- plugins -> Notifier interface -->
-        <mxCell id="e_ip_n" value="notifier.Upsert/Delete" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;fontStyle=2;fontSize=9;" edge="1" source="ip_pod" target="notifier" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_ss_n" value="" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;" edge="1" source="ss_pod" target="notifier" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e_fd_n" value="" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;" edge="1" source="fd_load" target="notifier" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- Notifier -> datastoreNotifier -->
-        <mxCell id="e_n_impl" value="implements" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;dashed=1;fontStyle=2;fontSize=9;" edge="1" source="notifier" target="notifier_impl" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- datastoreNotifier -> Datastore -->
-        <mxCell id="e_impl_ds" value="BackendUpsert/Delete" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontStyle=2;fontSize=9;" edge="1" source="notifier_impl" target="ds" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- InferencePool reconciler -> Datastore (PoolSet) -->
-        <mxCell id="e_ip_ds" value="ds.PoolSet()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;dashed=1;fontStyle=2;fontSize=9;" edge="1" source="ip_pool" target="ds" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="380" y="570" />
-              <mxPoint x="1120" y="570" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- StaticSelector -> Datastore (PoolSetStatic) -->
-        <mxCell id="e_ss_ds" value="ds.PoolSetStatic()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;dashed=1;fontStyle=2;fontSize=9;" edge="1" source="ss_pool" target="ds" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="580" y="555" />
-              <mxPoint x="1120" y="555" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- Datalayer -> Datastore (endpoint metrics) -->
-        <mxCell id="e_dl_ds" value="epf.NewEndpoint()&#xa;ep.UpdateMetadata()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontStyle=2;fontSize=9;" edge="1" source="dl" target="ds" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="420" y="715" />
-              <mxPoint x="1120" y="715" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- ext-proc -> Envoy -->
-        <mxCell id="e_ext_env" value="gRPC (ext_proc)" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;fontStyle=2;fontSize=9;" edge="1" source="extproc" target="envoy" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- ext-proc reads datastore -->
-        <mxCell id="e_ext_ds" value="reads endpoints" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#6c8ebf;dashed=1;fontStyle=2;fontSize=9;" edge="1" source="extproc" target="ds" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="680" y="640" />
-              <mxPoint x="1200" y="640" />
-              <mxPoint x="1200" y="570" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- runner creates notifier -->
-        <mxCell id="e_run_notifier" value="discovery.NewNotifier(ds)" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;dashed=1;fontStyle=2;fontSize=9;" edge="1" source="resolve" target="notifier_impl" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="460" y="200" />
-              <mxPoint x="1210" y="200" />
-              <mxPoint x="1210" y="480" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- ===== LEGEND ===== -->
-        <mxCell id="legend" value="Legend" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="1140" y="800" width="360" height="160" as="geometry" />
-        </mxCell>
-        <mxCell id="l1" value="" style="endArrow=block;strokeColor=#82b366;dashed=1;" edge="1" parent="legend">
-          <mxGeometry x="20" y="45" width="80" height="20" as="geometry">
-            <Array as="points"><mxPoint x="100" y="55" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="l1t" value="goroutine started by errgroup" style="text;fontSize=10;strokeColor=none;fillColor=none;" vertex="1" parent="legend">
-          <mxGeometry x="110" y="40" width="230" height="20" as="geometry" />
-        </mxCell>
-        <mxCell id="l2" value="" style="endArrow=block;strokeColor=#d79b00;" edge="1" parent="legend">
-          <mxGeometry x="20" y="75" width="80" height="20" as="geometry">
-            <Array as="points"><mxPoint x="100" y="85" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="l2t" value="notifier.Upsert/Delete call" style="text;fontSize=10;strokeColor=none;fillColor=none;" vertex="1" parent="legend">
-          <mxGeometry x="110" y="70" width="230" height="20" as="geometry" />
-        </mxCell>
-        <mxCell id="l3" value="" style="endArrow=block;strokeColor=#b85450;" edge="1" parent="legend">
-          <mxGeometry x="20" y="105" width="80" height="20" as="geometry">
-            <Array as="points"><mxPoint x="100" y="115" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="l3t" value="datastore write" style="text;fontSize=10;strokeColor=none;fillColor=none;" vertex="1" parent="legend">
-          <mxGeometry x="110" y="100" width="230" height="20" as="geometry" />
-        </mxCell>
-        <mxCell id="l4" value="" style="endArrow=block;strokeColor=#6c8ebf;dashed=1;" edge="1" parent="legend">
-          <mxGeometry x="20" y="135" width="80" height="20" as="geometry">
-            <Array as="points"><mxPoint x="100" y="145" /></Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="l4t" value="datastore read" style="text;fontSize=10;strokeColor=none;fillColor=none;" vertex="1" parent="legend">
-          <mxGeometry x="110" y="130" width="230" height="20" as="geometry" />
-        </mxCell>
-
-      </root>
-    </mxGraphModel>
-  </diagram>
+<mxfile host="65bd71144e">
+    <diagram name="Discovery Architecture" id="discovery-arch">
+        <mxGraphModel dx="579" dy="575" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="runner" value="Runner (cmd/epp/runner)" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="40" width="1560" height="210" as="geometry"/>
+                </mxCell>
+                <mxCell id="rg" value="RunnableGroup (errgroup)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=11;" parent="runner" vertex="1">
+                    <mxGeometry x="20" y="50" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="g_disc" value="g.Add(&quot;discovery&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="260" y="50" width="160" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="g_poll" value="g.Add(&quot;pollers&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="440" y="50" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="g_ext" value="g.Add(&quot;ext-proc&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="600" y="50" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="g_health" value="g.Add(&quot;health&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="760" y="50" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="g_metrics" value="g.Add(&quot;metrics&quot;)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=2;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="920" y="50" width="140" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="resolve" value="resolveDiscovery()&#xa;(from config or CLI flags)" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="270" y="120" width="200" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="ds_setup" value="NewDatastore()&#xa;+ registerMetrics()&#xa;+ buildServerRunner()" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" parent="runner" vertex="1">
+                    <mxGeometry x="490" y="100" width="180" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rg_g" style="edgeStyle=orthogonalEdgeStyle;" parent="runner" source="rg" target="g_disc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rg_g2" style="edgeStyle=orthogonalEdgeStyle;" parent="runner" source="rg" target="g_poll" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rg_g3" style="edgeStyle=orthogonalEdgeStyle;" parent="runner" source="rg" target="g_ext" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rg_g4" style="edgeStyle=orthogonalEdgeStyle;" parent="runner" source="rg" target="g_health" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_rg_g5" style="edgeStyle=orthogonalEdgeStyle;" parent="runner" source="rg" target="g_metrics" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="ip" value="InferencePoolDiscoveryPlugin&#xa;(pkg/.../discovery/k8s)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="310" width="340" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="ip_mgr" value="ctrl.Manager (internal)" style="rounded=1;fillColor=#82b366;fontColor=#ffffff;strokeColor=#5d8a5e;fontSize=10;fontStyle=1;" parent="ip" vertex="1">
+                    <mxGeometry x="20" y="50" width="300" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="ip_pool" value="InferencePoolReconciler&#xa;-- watches InferencePool CRD&#xa;-- calls ds.PoolSet()" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ip" vertex="1">
+                    <mxGeometry x="20" y="100" width="300" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="ip_pod" value="podNotifierReconciler&#xa;-- watches Pods&#xa;-- calls notifier.Upsert/Delete" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ip" vertex="1">
+                    <mxGeometry x="20" y="165" width="300" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="ip_obj" value="InferenceObjective + ModelRewrite Reconcilers&#xa;(optional, if CRDs installed)" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ip" vertex="1">
+                    <mxGeometry x="20" y="210" width="300" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="ss" value="StaticSelectorDiscoveryPlugin&#xa;(pkg/.../discovery/k8s)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="420" y="310" width="320" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="ss_pool" value="ds.PoolSetStatic(pool)&#xa;-- selector + ports from params" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ss" vertex="1">
+                    <mxGeometry x="20" y="50" width="280" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="ss_mgr" value="ctrl.Manager (internal)" style="rounded=1;fillColor=#82b366;fontColor=#ffffff;strokeColor=#5d8a5e;fontSize=10;fontStyle=1;" parent="ss" vertex="1">
+                    <mxGeometry x="20" y="100" width="280" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="ss_pod" value="podNotifierReconciler&#xa;-- watches Pods&#xa;-- calls notifier.Upsert/Delete" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ss" vertex="1">
+                    <mxGeometry x="20" y="145" width="280" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="fd" value="FileDiscoveryPlugin&#xa;(pkg/.../discovery/file)" style="swimlane;startSize=35;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="780" y="310" width="300" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="fd_load" value="load() -- reads YAML/JSON file&#xa;calls notifier.Upsert per endpoint&#xa;calls notifier.Delete for removed" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="fd" vertex="1">
+                    <mxGeometry x="20" y="50" width="260" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="fd_watch" value="fsnotify watcher&#xa;(when watchFile: true)&#xa;re-calls load() on file change" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="fd" vertex="1">
+                    <mxGeometry x="20" y="120" width="260" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="notifier" value="discovery.Notifier&#xa;(interface)" style="ellipse;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="1120" y="360" width="180" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="notifier_impl" value="datastoreNotifier&#xa;(discovery.NewNotifier(ds))" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="1110" y="480" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="ds" value="Datastore" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="1120" y="570" width="380" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="ds_pool" value="pool (EndpointPool)&#xa;selector, targetPorts, namespace" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ds" vertex="1">
+                    <mxGeometry x="20" y="45" width="340" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="ds_pods" value="pods (sync.Map)&#xa;NamespacedName -&gt; Endpoint" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ds" vertex="1">
+                    <mxGeometry x="20" y="95" width="340" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="ds_obj" value="objectives, modelRewrites" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="ds" vertex="1">
+                    <mxGeometry x="20" y="145" width="340" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="dl" value="Datalayer Runtime" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="640" width="380" height="150" as="geometry"/>
+                </mxCell>
+                <mxCell id="dl_cfg" value="Configure() -- sets up polling sources" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="dl" vertex="1">
+                    <mxGeometry x="20" y="45" width="340" height="35" as="geometry"/>
+                </mxCell>
+                <mxCell id="dl_poll" value="StartPollers() -- per-endpoint HTTP metrics polling&#xa;scrapes /metrics from each inference server" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="dl" vertex="1">
+                    <mxGeometry x="20" y="90" width="340" height="45" as="geometry"/>
+                </mxCell>
+                <mxCell id="extproc" value="ext-proc gRPC server&#xa;(port 9002)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="660" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="health" value="health gRPC server&#xa;(port 9003)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="700" y="660" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="prom" value="Prometheus HTTP server&#xa;(port 9090)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="920" y="660" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="envoy" value="Envoy&#xa;(ext_proc filter)" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="790" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="e1" value="disc.Start(ctx, notifier)" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;fontStyle=2;fontSize=9;" parent="1" source="g_disc" target="ip" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="340" y="280"/>
+                            <mxPoint x="210" y="280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;" parent="1" source="g_disc" target="ss" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="340" y="280"/>
+                            <mxPoint x="580" y="280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#82b366;" parent="1" source="g_disc" target="fd" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="340" y="280"/>
+                            <mxPoint x="930" y="280"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_disc_label" value="one of (from config or CLI flags)" style="text;fontSize=9;fontStyle=2;strokeColor=none;fillColor=none;" parent="1" vertex="1">
+                    <mxGeometry x="170" y="265" width="220" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_poll" value="dlRuntime.StartPollers()" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#d6b656;fontStyle=2;fontSize=9;" parent="1" source="g_poll" target="dl" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_ext" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" parent="1" source="g_ext" target="extproc" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_hlt" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" parent="1" source="g_health" target="health" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_met" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#6c8ebf;" parent="1" source="g_metrics" target="prom" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_ip_n" value="notifier.Upsert/Delete" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;fontStyle=2;fontSize=9;" parent="1" source="ip_pod" target="notifier" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_ss_n" value="" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;" parent="1" source="ss_pod" target="notifier" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_fd_n" value="" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;" parent="1" source="fd_load" target="notifier" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_n_impl" value="implements" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;dashed=1;fontStyle=2;fontSize=9;" parent="1" source="notifier" target="notifier_impl" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_impl_ds" value="BackendUpsert/Delete" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontStyle=2;fontSize=9;" parent="1" source="notifier_impl" target="ds" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_ip_ds" value="ds.PoolSet()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;dashed=1;fontStyle=2;fontSize=9;" parent="1" source="ip_pool" target="ds" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="380" y="570"/>
+                            <mxPoint x="1120" y="570"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_ss_ds" value="ds.PoolSetStatic()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;dashed=1;fontStyle=2;fontSize=9;" parent="1" source="ss_pool" target="ds" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="580" y="555"/>
+                            <mxPoint x="1120" y="555"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_dl_ds" value="epf.NewEndpoint()&#xa;ep.UpdateMetadata()" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;fontStyle=2;fontSize=9;" parent="1" source="dl" target="ds" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="420" y="715"/>
+                            <mxPoint x="1120" y="715"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_ext_env" value="gRPC (ext_proc)" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;fontStyle=2;fontSize=9;" parent="1" source="extproc" target="envoy" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e_ext_ds" value="reads endpoints" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#6c8ebf;dashed=1;fontStyle=2;fontSize=9;" parent="1" source="extproc" target="ds" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="680" y="640"/>
+                            <mxPoint x="1200" y="640"/>
+                            <mxPoint x="1200" y="570"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e_run_notifier" value="discovery.NewNotifier(ds)" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;dashed=1;fontStyle=2;fontSize=9;" parent="1" source="resolve" target="notifier_impl" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="460" y="200"/>
+                            <mxPoint x="1210" y="200"/>
+                            <mxPoint x="1210" y="480"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="legend" value="Legend" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;" parent="1" vertex="1">
+                    <mxGeometry x="1140" y="800" width="360" height="160" as="geometry"/>
+                </mxCell>
+                <mxCell id="l1" value="" style="endArrow=block;strokeColor=#82b366;dashed=1;" parent="legend" edge="1">
+                    <mxGeometry x="20" y="45" width="80" height="20" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="100" y="55"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="l1t" value="goroutine started by errgroup" style="text;fontSize=10;strokeColor=none;fillColor=none;" parent="legend" vertex="1">
+                    <mxGeometry x="110" y="40" width="230" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="l2" value="" style="endArrow=block;strokeColor=#d79b00;" parent="legend" edge="1">
+                    <mxGeometry x="20" y="75" width="80" height="20" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="100" y="85"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="l2t" value="notifier.Upsert/Delete call" style="text;fontSize=10;strokeColor=none;fillColor=none;" parent="legend" vertex="1">
+                    <mxGeometry x="110" y="70" width="230" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="l3" value="" style="endArrow=block;strokeColor=#b85450;" parent="legend" edge="1">
+                    <mxGeometry x="20" y="105" width="80" height="20" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="100" y="115"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="l3t" value="datastore write" style="text;fontSize=10;strokeColor=none;fillColor=none;" parent="legend" vertex="1">
+                    <mxGeometry x="110" y="100" width="230" height="20" as="geometry"/>
+                </mxCell>
+                <mxCell id="l4" value="" style="endArrow=block;strokeColor=#6c8ebf;dashed=1;" parent="legend" edge="1">
+                    <mxGeometry x="20" y="135" width="80" height="20" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="100" y="145"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="l4t" value="datastore read" style="text;fontSize=10;strokeColor=none;fillColor=none;" parent="legend" vertex="1">
+                    <mxGeometry x="110" y="130" width="230" height="20" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>

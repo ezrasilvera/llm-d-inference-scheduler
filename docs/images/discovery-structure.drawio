@@ -1,236 +1,171 @@
-<mxfile host="app.diagrams.net" version="24.0.0">
-  <diagram name="Discovery Structure" id="discovery-structure">
-    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-
-        <!-- ========== PACKAGE: framework/interface/plugin ========== -->
-        <mxCell id="pkg_plugin" value="pkg/epp/framework/interface/plugin" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="280" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="iPlugin" value="&lt;&lt;interface&gt;&gt;&#xa;Plugin&#xa;--&#xa;TypedName() TypedName" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_plugin">
-          <mxGeometry x="20" y="35" width="240" height="55" as="geometry" />
-        </mxCell>
-
-        <!-- ========== PACKAGE: framework/interface/discovery ========== -->
-        <mxCell id="pkg_disc" value="pkg/epp/framework/interface/discovery" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="360" y="40" width="420" height="450" as="geometry" />
-        </mxCell>
-
-        <mxCell id="iDiscovery" value="&lt;&lt;interface&gt;&gt;&#xa;DiscoveryPlugin&#xa;--&#xa;[embeds Plugin]&#xa;Start(ctx, Notifier) error" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_disc">
-          <mxGeometry x="20" y="35" width="380" height="65" as="geometry" />
-        </mxCell>
-
-        <mxCell id="iNotifier" value="&lt;&lt;interface&gt;&gt;&#xa;Notifier&#xa;--&#xa;Upsert(endpoint *EndpointMetadata)&#xa;Delete(id NamespacedName)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_disc">
-          <mxGeometry x="20" y="130" width="380" height="70" as="geometry" />
-        </mxCell>
-
-        <mxCell id="iBackendStore" value="&lt;&lt;interface&gt;&gt;&#xa;BackendStore&#xa;--&#xa;BackendUpsert(ctx, *EndpointMetadata)&#xa;BackendDelete(id NamespacedName)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_disc">
-          <mxGeometry x="20" y="230" width="380" height="70" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cDSNotifier" value="datastoreNotifier&#xa;--&#xa;store BackendStore&#xa;--&#xa;Upsert(endpoint) -- calls store.BackendUpsert&#xa;Delete(id)       -- calls store.BackendDelete" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="pkg_disc">
-          <mxGeometry x="20" y="330" width="380" height="80" as="geometry" />
-        </mxCell>
-
-        <mxCell id="fNewNotifier" value="NewNotifier(BackendStore) Notifier" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="pkg_disc">
-          <mxGeometry x="20" y="420" width="380" height="25" as="geometry" />
-        </mxCell>
-
-        <!-- ========== PACKAGE: plugins/discovery/file ========== -->
-        <mxCell id="pkg_file" value="pkg/epp/framework/plugins/discovery/file" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="40" y="200" width="280" height="220" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cFileDisc" value="FileDiscovery&#xa;--&#xa;path      string&#xa;watchFile bool&#xa;current   map[NamespacedName]struct{}&#xa;--&#xa;Start(ctx, Notifier) error&#xa;load(ctx, Notifier) error&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="pkg_file">
-          <mxGeometry x="10" y="35" width="260" height="145" as="geometry" />
-        </mxCell>
-
-        <mxCell id="fFileFactory" value="Factory(name, params, Handle) Plugin" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="pkg_file">
-          <mxGeometry x="10" y="188" width="260" height="25" as="geometry" />
-        </mxCell>
-
-        <!-- ========== PACKAGE: plugins/discovery/k8s ========== -->
-        <mxCell id="pkg_k8s" value="pkg/epp/framework/plugins/discovery/k8s" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="820" y="40" width="800" height="590" as="geometry" />
-        </mxCell>
-
-        <mxCell id="iDSProvider" value="&lt;&lt;interface&gt;&gt;&#xa;DatastoreProvider&#xa;--&#xa;SetDatastore(Datastore)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_k8s">
-          <mxGeometry x="20" y="35" width="360" height="55" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cIPDisc" value="InferencePoolDiscoveryPlugin&#xa;--&#xa;PoolName, PoolNamespace, PoolGroup string&#xa;LeaderElect bool&#xa;ds          Datastore&#xa;--&#xa;Start(ctx, Notifier) error&#xa;  - ctrl.GetConfig()&#xa;  - ctrl.NewManager(opts: metrics disabled)&#xa;  - InferencePoolReconciler.SetupWithManager&#xa;  - podNotifierReconciler.SetupWithManager&#xa;  - [optional] Objective/ModelRewrite reconcilers&#xa;  - mgr.Start(ctx)&#xa;SetDatastore(Datastore)&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="pkg_k8s">
-          <mxGeometry x="20" y="120" width="360" height="230" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cSSDisc" value="StaticSelectorDiscoveryPlugin&#xa;--&#xa;selector     string&#xa;targetPorts  []int&#xa;namespace    string&#xa;ds           Datastore&#xa;--&#xa;Start(ctx, Notifier) error&#xa;  - ds.PoolSetStatic(pool)&#xa;  - ctrl.GetConfig()&#xa;  - ctrl.NewManager(opts: metrics disabled)&#xa;  - podNotifierReconciler.SetupWithManager&#xa;  - mgr.Start(ctx)&#xa;SetDatastore(Datastore)&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="pkg_k8s">
-          <mxGeometry x="420" y="120" width="360" height="210" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cPodRec" value="podNotifierReconciler  [internal]&#xa;--&#xa;ds       Datastore&#xa;notifier Notifier&#xa;ports    func() []int&#xa;--&#xa;Reconcile(ctx, Request) Result&#xa;  - ds.PoolHasSynced() gate&#xa;  - Get pod from K8s cache&#xa;  - podToEndpoints(pod, ports())&#xa;  - notifier.Upsert(meta) per endpoint&#xa;  - notifier.Delete(id) on remove&#xa;SetupWithManager(mgr) error" style="rounded=0;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="pkg_k8s">
-          <mxGeometry x="20" y="385" width="380" height="185" as="geometry" />
-        </mxCell>
-
-        <mxCell id="fHelpers" value="podToEndpoints(pod, ports) []*EndpointMetadata&#xa;allEndpointIDs(podName, ns, ports) []NamespacedName&#xa;InferencePoolFactory / StaticSelectorFactory&#xa;NewInferencePoolDiscoveryPlugin(...)&#xa;NewStaticSelectorDiscoveryPlugin(...)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="pkg_k8s">
-          <mxGeometry x="420" y="385" width="360" height="85" as="geometry" />
-        </mxCell>
-
-        <!-- ========== PACKAGE: datastore ========== -->
-        <mxCell id="pkg_ds" value="pkg/epp/datastore" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="820" y="670" width="800" height="200" as="geometry" />
-        </mxCell>
-
-        <mxCell id="iDatastore" value="&lt;&lt;interface&gt;&gt;&#xa;Datastore&#xa;--&#xa;PoolSet / PoolSetStatic / PoolGet / PoolHasSynced / PoolLabelsMatch&#xa;PodList / PodUpdateOrAddIfNotExist / PodDelete&#xa;BackendUpsert / BackendDelete&#xa;ObjectiveSet/Get/Delete, ModelRewriteSet/Get/Delete, Clear" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" vertex="1" parent="pkg_ds">
-          <mxGeometry x="20" y="35" width="360" height="90" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cDatastore" value="datastore  [concrete]&#xa;--&#xa;pool           *EndpointPool&#xa;pods           sync.Map (NamespacedName -&gt; Endpoint)&#xa;objectives     map[string]*InferenceObjective&#xa;modelRewrites  *modelRewriteStore&#xa;epf            EndpointFactory" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="pkg_ds">
-          <mxGeometry x="420" y="35" width="360" height="145" as="geometry" />
-        </mxCell>
-
-        <!-- ========== PACKAGE: controller ========== -->
-        <mxCell id="pkg_ctrl" value="pkg/epp/controller" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" vertex="1" parent="1">
-          <mxGeometry x="40" y="460" width="740" height="130" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cIPRec" value="InferencePoolReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.PoolSet(pool)" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="pkg_ctrl">
-          <mxGeometry x="10" y="35" width="220" height="80" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cObjRec" value="InferenceObjectiveReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.ObjectiveSet/Delete" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="pkg_ctrl">
-          <mxGeometry x="250" y="35" width="220" height="80" as="geometry" />
-        </mxCell>
-
-        <mxCell id="cMRRec" value="InferenceModelRewriteReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.ModelRewriteSet/Delete" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="pkg_ctrl">
-          <mxGeometry x="490" y="35" width="230" height="80" as="geometry" />
-        </mxCell>
-
-        <!-- ========== RELATIONS ========== -->
-
-        <!-- DiscoveryPlugin embeds Plugin -->
-        <mxCell id="r1" value="embeds" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" edge="1" source="iDiscovery" target="iPlugin" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- FileDiscovery implements DiscoveryPlugin -->
-        <mxCell id="r2" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cFileDisc" target="iDiscovery" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- InferencePoolDiscoveryPlugin implements DiscoveryPlugin -->
-        <mxCell id="r3" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cIPDisc" target="iDiscovery" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="200" y="235" />
-              <mxPoint x="570" y="235" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- StaticSelectorDiscoveryPlugin implements DiscoveryPlugin -->
-        <mxCell id="r4" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cSSDisc" target="iDiscovery" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1200" y="235" />
-              <mxPoint x="570" y="235" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- InferencePoolDiscoveryPlugin implements DatastoreProvider -->
-        <mxCell id="r5" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" edge="1" source="cIPDisc" target="iDSProvider" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- StaticSelectorDiscoveryPlugin implements DatastoreProvider -->
-        <mxCell id="r6" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" edge="1" source="cSSDisc" target="iDSProvider" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- datastoreNotifier implements Notifier -->
-        <mxCell id="r7" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cDSNotifier" target="iNotifier" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- datastoreNotifier uses BackendStore -->
-        <mxCell id="r8" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" edge="1" source="cDSNotifier" target="iBackendStore" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- datastore implements BackendStore -->
-        <mxCell id="r9" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cDatastore" target="iBackendStore" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1200" y="815" />
-              <mxPoint x="700" y="815" />
-              <mxPoint x="700" y="360" />
-              <mxPoint x="570" y="360" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- datastore implements Datastore -->
-        <mxCell id="r10" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cDatastore" target="iDatastore" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- podNotifierReconciler uses Notifier -->
-        <mxCell id="r11" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" edge="1" source="cPodRec" target="iNotifier" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="820" y="490" />
-              <mxPoint x="700" y="490" />
-              <mxPoint x="700" y="200" />
-              <mxPoint x="570" y="200" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- podNotifierReconciler uses Datastore -->
-        <mxCell id="r12" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" edge="1" source="cPodRec" target="iDatastore" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="400" y="630" />
-              <mxPoint x="400" y="720" />
-              <mxPoint x="840" y="720" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- InferencePoolDiscoveryPlugin contains podNotifierReconciler -->
-        <mxCell id="r13" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cIPDisc" target="cPodRec" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- StaticSelectorDiscoveryPlugin contains podNotifierReconciler -->
-        <mxCell id="r14" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cSSDisc" target="cPodRec" parent="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- InferencePoolReconciler uses Datastore -->
-        <mxCell id="r15" value="ds.PoolSet" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#b85450;fontSize=9;fontStyle=2;" edge="1" source="cIPRec" target="iDatastore" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="150" y="660" />
-              <mxPoint x="150" y="750" />
-              <mxPoint x="840" y="750" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-        <!-- InferencePoolDiscoveryPlugin creates InferencePoolReconciler -->
-        <mxCell id="r16" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" edge="1" source="cIPDisc" target="cIPRec" parent="1">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="1000" y="380" />
-              <mxPoint x="1000" y="640" />
-              <mxPoint x="150" y="640" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-
-      </root>
-    </mxGraphModel>
-  </diagram>
+<mxfile host="65bd71144e">
+    <diagram name="Discovery Structure" id="discovery-structure">
+        <mxGraphModel dx="699" dy="695" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="pkg_plugin" value="pkg/epp/framework/interface/plugin" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="40" width="280" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="iPlugin" value="&lt;&lt;interface&gt;&gt;&#xa;Plugin&#xa;--&#xa;TypedName() TypedName" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_plugin" vertex="1">
+                    <mxGeometry x="20" y="35" width="240" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="pkg_disc" value="pkg/epp/framework/interface/discovery" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="40" width="420" height="450" as="geometry"/>
+                </mxCell>
+                <mxCell id="iDiscovery" value="&lt;&lt;interface&gt;&gt;&#xa;DiscoveryPlugin&#xa;--&#xa;[embeds Plugin]&#xa;Start(ctx, Notifier) error" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_disc" vertex="1">
+                    <mxGeometry x="20" y="35" width="380" height="65" as="geometry"/>
+                </mxCell>
+                <mxCell id="iNotifier" value="&lt;&lt;interface&gt;&gt;&#xa;Notifier&#xa;--&#xa;Upsert(endpoint *EndpointMetadata)&#xa;Delete(id NamespacedName)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_disc" vertex="1">
+                    <mxGeometry x="20" y="130" width="380" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="iBackendStore" value="&lt;&lt;interface&gt;&gt;&#xa;BackendStore&#xa;--&#xa;BackendUpsert(ctx, *EndpointMetadata)&#xa;BackendDelete(id NamespacedName)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_disc" vertex="1">
+                    <mxGeometry x="20" y="230" width="380" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="cDSNotifier" value="datastoreNotifier&#xa;--&#xa;store BackendStore&#xa;--&#xa;Upsert(endpoint) -- calls store.BackendUpsert&#xa;Delete(id)       -- calls store.BackendDelete" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="pkg_disc" vertex="1">
+                    <mxGeometry x="20" y="330" width="380" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="fNewNotifier" value="NewNotifier(BackendStore) Notifier" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="pkg_disc" vertex="1">
+                    <mxGeometry x="20" y="420" width="380" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="pkg_file" value="pkg/epp/framework/plugins/discovery/file" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="200" width="280" height="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="cFileDisc" value="FileDiscovery&#xa;--&#xa;path      string&#xa;watchFile bool&#xa;current   map[NamespacedName]struct{}&#xa;--&#xa;Start(ctx, Notifier) error&#xa;load(ctx, Notifier) error&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="pkg_file" vertex="1">
+                    <mxGeometry x="10" y="35" width="260" height="145" as="geometry"/>
+                </mxCell>
+                <mxCell id="fFileFactory" value="Factory(name, params, Handle) Plugin" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="pkg_file" vertex="1">
+                    <mxGeometry x="10" y="188" width="260" height="25" as="geometry"/>
+                </mxCell>
+                <mxCell id="pkg_k8s" value="pkg/epp/framework/plugins/discovery/k8s" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="820" y="40" width="800" height="590" as="geometry"/>
+                </mxCell>
+                <mxCell id="iDSProvider" value="&lt;&lt;interface&gt;&gt;&#xa;DatastoreProvider&#xa;--&#xa;SetDatastore(Datastore)" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_k8s" vertex="1">
+                    <mxGeometry x="20" y="35" width="360" height="55" as="geometry"/>
+                </mxCell>
+                <mxCell id="cIPDisc" value="InferencePoolDiscoveryPlugin&#xa;--&#xa;PoolName, PoolNamespace, PoolGroup string&#xa;LeaderElect bool&#xa;ds          Datastore&#xa;--&#xa;Start(ctx, Notifier) error&#xa;  - ctrl.GetConfig()&#xa;  - ctrl.NewManager(opts: metrics disabled)&#xa;  - InferencePoolReconciler.SetupWithManager&#xa;  - podNotifierReconciler.SetupWithManager&#xa;  - [optional] Objective/ModelRewrite reconcilers&#xa;  - mgr.Start(ctx)&#xa;SetDatastore(Datastore)&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="pkg_k8s" vertex="1">
+                    <mxGeometry x="20" y="120" width="360" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="cSSDisc" value="StaticSelectorDiscoveryPlugin&#xa;--&#xa;selector     string&#xa;targetPorts  []int&#xa;namespace    string&#xa;ds           Datastore&#xa;--&#xa;Start(ctx, Notifier) error&#xa;  - ds.PoolSetStatic(pool)&#xa;  - ctrl.GetConfig()&#xa;  - ctrl.NewManager(opts: metrics disabled)&#xa;  - podNotifierReconciler.SetupWithManager&#xa;  - mgr.Start(ctx)&#xa;SetDatastore(Datastore)&#xa;TypedName() TypedName" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="pkg_k8s" vertex="1">
+                    <mxGeometry x="420" y="120" width="360" height="210" as="geometry"/>
+                </mxCell>
+                <mxCell id="cPodRec" value="podNotifierReconciler  [internal]&#xa;--&#xa;ds       Datastore&#xa;notifier Notifier&#xa;ports    func() []int&#xa;--&#xa;Reconcile(ctx, Request) Result&#xa;  - ds.PoolHasSynced() gate&#xa;  - Get pod from K8s cache&#xa;  - podToEndpoints(pod, ports())&#xa;  - notifier.Upsert(meta) per endpoint&#xa;  - notifier.Delete(id) on remove&#xa;SetupWithManager(mgr) error" style="rounded=0;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" parent="pkg_k8s" vertex="1">
+                    <mxGeometry x="20" y="395" width="380" height="185" as="geometry"/>
+                </mxCell>
+                <mxCell id="fHelpers" value="podToEndpoints(pod, ports) []*EndpointMetadata&#xa;allEndpointIDs(podName, ns, ports) []NamespacedName&#xa;InferencePoolFactory / StaticSelectorFactory&#xa;NewInferencePoolDiscoveryPlugin(...)&#xa;NewStaticSelectorDiscoveryPlugin(...)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" parent="pkg_k8s" vertex="1">
+                    <mxGeometry x="420" y="385" width="360" height="85" as="geometry"/>
+                </mxCell>
+                <mxCell id="pkg_ds" value="pkg/epp/datastore" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="820" y="659" width="800" height="200" as="geometry"/>
+                </mxCell>
+                <mxCell id="iDatastore" value="&lt;&lt;interface&gt;&gt;&#xa;Datastore&#xa;--&#xa;PoolSet / PoolSetStatic / PoolGet / PoolHasSynced / PoolLabelsMatch&#xa;PodList / PodUpdateOrAddIfNotExist / PodDelete&#xa;BackendUpsert / BackendDelete&#xa;ObjectiveSet/Get/Delete, ModelRewriteSet/Get/Delete, Clear" style="rounded=0;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontStyle=1;" parent="pkg_ds" vertex="1">
+                    <mxGeometry x="20" y="36" width="360" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="cDatastore" value="datastore  [concrete]&#xa;--&#xa;pool           *EndpointPool&#xa;pods           sync.Map (NamespacedName -&gt; Endpoint)&#xa;objectives     map[string]*InferenceObjective&#xa;modelRewrites  *modelRewriteStore&#xa;epf            EndpointFactory" style="rounded=0;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" parent="pkg_ds" vertex="1">
+                    <mxGeometry x="420" y="35" width="360" height="145" as="geometry"/>
+                </mxCell>
+                <mxCell id="pkg_ctrl" value="pkg/epp/controller" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=3;fontSize=10;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="481" width="740" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="cIPRec" value="InferencePoolReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.PoolSet(pool)" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="pkg_ctrl" vertex="1">
+                    <mxGeometry x="10" y="35" width="220" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="cObjRec" value="InferenceObjectiveReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.ObjectiveSet/Delete" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="pkg_ctrl" vertex="1">
+                    <mxGeometry x="250" y="35" width="220" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="cMRRec" value="InferenceModelRewriteReconciler&#xa;--&#xa;Datastore Datastore&#xa;--&#xa;Reconcile: ds.ModelRewriteSet/Delete" style="rounded=0;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" parent="pkg_ctrl" vertex="1">
+                    <mxGeometry x="490" y="35" width="230" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="r1" value="embeds" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" parent="1" source="iDiscovery" target="iPlugin" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r2" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cFileDisc" target="iDiscovery" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r3" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cIPDisc" target="iDiscovery" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="200" y="235"/>
+                            <mxPoint x="570" y="235"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r4" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cSSDisc" target="iDiscovery" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1200" y="235"/>
+                            <mxPoint x="570" y="235"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r5" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" parent="1" source="cIPDisc" target="iDSProvider" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r6" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#6c8ebf;fontSize=9;fontStyle=2;" parent="1" source="cSSDisc" target="iDSProvider" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r7" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cDSNotifier" target="iNotifier" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r8" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" parent="1" source="cDSNotifier" target="iBackendStore" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r9" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cDatastore" target="iBackendStore" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1200" y="815"/>
+                            <mxPoint x="700" y="815"/>
+                            <mxPoint x="700" y="360"/>
+                            <mxPoint x="570" y="360"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r10" value="implements" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cDatastore" target="iDatastore" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r11" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" parent="1" source="cPodRec" target="iNotifier" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="820" y="490"/>
+                            <mxPoint x="700" y="490"/>
+                            <mxPoint x="700" y="200"/>
+                            <mxPoint x="570" y="200"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r12" value="uses" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#d79b00;fontSize=9;fontStyle=2;" parent="1" source="cPodRec" target="iDatastore" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="400" y="630"/>
+                            <mxPoint x="400" y="720"/>
+                            <mxPoint x="840" y="720"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r13" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" parent="1" source="cIPDisc" target="cPodRec" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r14" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" parent="1" source="cSSDisc" target="cPodRec" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="r15" value="ds.PoolSet" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#b85450;fontSize=9;fontStyle=2;entryX=-0.006;entryY=0.622;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="cIPRec" target="iDatastore" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="150" y="750"/>
+                            <mxPoint x="838" y="750"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="r16" value="creates" style="edgeStyle=orthogonalEdgeStyle;endArrow=open;endFill=0;strokeColor=#82b366;fontSize=9;fontStyle=2;" parent="1" source="cIPDisc" target="cIPRec" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1000" y="380"/>
+                            <mxPoint x="1000" y="640"/>
+                            <mxPoint x="150" y="640"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
 </mxfile>
